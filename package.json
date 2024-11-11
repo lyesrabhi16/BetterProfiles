@@ -1,9 +1,10 @@
 {
-  "name": "extensions-workspace",
-  "displayName": "Extensions Workspace",
+  "name": "better-profiles",
+  "displayName": "Better Profiles",
   "description": "grouping extensions and activating them only when needed",
   "publisher": "lyesrabhi",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "repository": "https://github.com/lyesrabhi16/BetterProfiles.git",
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -20,7 +21,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "extensions-workspace.activate",
+        "command": "better-profiles.activate",
         "title": "EW: Activate Extension"
       }  
     ]

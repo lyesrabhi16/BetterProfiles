@@ -17,7 +17,7 @@ type Profile = {
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
-	console.log("Extension 'extensions-workspace' is now active!");
+	console.log("Extension 'better-profiles' is now active!");
 	
 	const getProfileFromLocation = async (profile: string) => {
 		return new Promise<Profile|undefined>((resolve, reject) => {
@@ -52,8 +52,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		});
 	};
 
-	const disposable_get_profiles = vscode.commands.registerCommand('extensions-workspace.getProfiles', async () => {
-		console.log("Command 'extensions-workspace.getProfiles' is now active!");
+	const disposable_get_profiles = vscode.commands.registerCommand('better-profiles.getProfiles', async () => {
+		console.log("Command 'better-profiles.getProfiles' is now active!");
 		const user_dir_path =  path.join(context.globalStorageUri.fsPath, '../..');
 		const global_storage_file = user_dir_path + '/globalStorage/storage.json';
 		console.log("user_dir: ", user_dir_path);
@@ -79,8 +79,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		});
 	});
 	
-	const disposable = vscode.commands.registerCommand('extensions-workspace.getCurrentProfile', async () => {
-		console.log("Command 'extensions-workspace.activate' is now active!");
+	const disposable = vscode.commands.registerCommand('better-profiles.getCurrentProfile', async () => {
+		console.log("Command 'better-profiles.activate' is now active!");
 		const user_dir_path =  path.join(context.globalStorageUri.fsPath, '../..');
 		const global_storage_file = user_dir_path + '/globalStorage/storage.json';
 		console.log("user_dir: ", user_dir_path);
@@ -115,7 +115,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	
 
 	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99999999);
-	const current_profile = await vscode.commands.executeCommand('extensions-workspace.getCurrentProfile') as Profile;
+	const current_profile = await vscode.commands.executeCommand('better-profiles.getCurrentProfile') as Profile;
 	if (current_profile !== undefined) {
 		statusBarItem.text = `$(${current_profile.icon}) ${current_profile.name}`;
 	}
@@ -128,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 	context.subscriptions.push(disposable_get_profiles);
 	context.subscriptions.push(statusBarItem);
-	await vscode.commands.executeCommand('extensions-workspace.getCurrentProfile');
+	await vscode.commands.executeCommand('better-profiles.getCurrentProfile');
 
 }
 
