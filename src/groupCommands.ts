@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type { BetterProfilesApi } from './api';
+import type { BetterProfilesApi, PromptUi } from './api';
 import {
 	CliInvocation,
 	DEFAULT_PROFILE_NAME,
@@ -13,6 +13,7 @@ import {
 	isInstalledExtensionPath,
 	pickExtensionsDir,
 	resolveCli,
+	uninstallExtension,
 	userDataDirFromGlobalStorage,
 } from './cli';
 import {
@@ -21,9 +22,13 @@ import {
 	SyncPlan,
 	addToGroup,
 	assignGroup,
+	commonToAllProfiles,
+	desiredExtensions,
 	emptyGroups,
 	parseGroups,
+	planCleanup,
 	planSync,
+	promptKey,
 	renderMatrix,
 	serializeGroups,
 } from './groups';
@@ -34,12 +39,28 @@ export interface SyncReport {
 	results: InstallResult[];
 	/** True when the user declined the confirmation. */
 	cancelled?: boolean;
+	/** Extensions the profile has that none of its groups mention (only when a cleanup was considered). */
+	extras?: string[];
+	uninstalled?: InstallResult[];
 }
+
+type UninstallMode = 'none' | 'ask' | string[];
+
+export interface GroupFeatures {
+	disposables: vscode.Disposable[];
+	checkSync(): Promise<void>;
+	resetPrompts(): Promise<void>;
+	groupsFilePath(): string;
+}
+
+const SELF_ID = 'lyesrabhi.better-profiles';
+const DISMISSED_KEY = 'betterProfiles.dismissedSyncPrompts';
 
 interface Dependencies {
 	context: vscode.ExtensionContext;
 	log: vscode.LogOutputChannel;
 	api: Pick<BetterProfilesApi, 'getProfiles' | 'getCurrentProfile'>;
+	ui: PromptUi;
 	/** Replaceable so the CLI can be faked. */
 	run?: Runner;
 }
@@ -50,7 +71,7 @@ const lower = (text: string) => text.toLowerCase();
  * Every command takes optional arguments for non-interactive use (that is how the tests drive them). Without
  * them the command asks with quick picks and input boxes.
  */
-export function registerGroupCommands({ context, log, api, run = defaultRunner }: Dependencies): vscode.Disposable[] {
+export function registerGroupCommands({ context, log, api, ui, run = defaultRunner }: Dependencies): GroupFeatures {
 	const settings = () => vscode.workspace.getConfiguration('betterProfiles');
 
 	// The groups live in this extension's global storage, which every profile shares (VS Code settings are per profile).
@@ -213,7 +234,80 @@ export function registerGroupCommands({ context, log, api, run = defaultRunner }
 		return markdown;
 	};
 
-	const syncProfile = async (args?: { profile?: string; confirm?: boolean }): Promise<SyncReport | undefined> => {
+	/** Everything the profile has that its groups do not, minus what must never be offered for removal. */
+	async function findExtras(cli: CliInvocation, profile: string, config: GroupsConfig): Promise<string[]> {
+		const lists = new Map<string, string[]>();
+		for (const name of await profileNames()) {
+			lists.set(name, (await listExtensions(cli, run, name)).map(e => e.id));
+		}
+		const protectedIds = [
+			// installed once for every profile ("application scoped"): removing it from one removes it from all
+			...commonToAllProfiles([...lists.values()]),
+			SELF_ID,
+			...(settings().get<string[]>('keepExtensions') ?? []),
+		];
+		return planCleanup(config, profile, lists.get(profile) ?? [], protectedIds).extras;
+	}
+
+	/** Offers (or, for an explicit list, applies) the removal of extras. Never removes anything without a confirmation. */
+	async function review(cli: CliInvocation, profile: string, config: GroupsConfig, mode: UninstallMode, confirmExplicit: boolean, report: SyncReport): Promise<void> {
+		const extras = await findExtras(cli, profile, config);
+		report.extras = extras;
+
+		let chosen: string[];
+		let needsConfirmation: boolean;
+		if (Array.isArray(mode)) {
+			const notExtras = mode.filter(id => !extras.some(extra => lower(extra) === lower(id)));
+			if (notExtras.length > 0) {
+				throw new Error(`"${notExtras[0]}" is not an extra of "${profile}" (it is in one of its groups, installed for every profile, protected, or not installed), so it will not be uninstalled.`);
+			}
+			chosen = mode.map(id => extras.find(extra => lower(extra) === lower(id))!);
+			needsConfirmation = confirmExplicit;
+		} else {
+			if (extras.length === 0) {
+				return;
+			}
+			const picked = await ui.pickMany(
+				`Extensions of "${profile}" that none of its groups mention`,
+				extras.map(id => ({ id, label: id })),
+			);
+			if (!picked?.length) {
+				return;
+			}
+			chosen = extras.filter(id => picked.includes(id));
+			needsConfirmation = true;
+		}
+
+		if (chosen.length === 0) {
+			return;
+		}
+		if (needsConfirmation && !await ui.confirm(
+			`Uninstall ${chosen.length} extension${chosen.length === 1 ? '' : 's'} from "${profile}"?`,
+			`${chosen.join('\n')}\n\nThey are removed from this profile only, and this extension cannot bring them back for you.`,
+			'Uninstall',
+		)) {
+			return;
+		}
+
+		const results: InstallResult[] = [];
+		await withProgress(`Uninstalling from "${profile}"…`, async () => {
+			for (const id of chosen) {
+				const result = await uninstallExtension(cli, run, id, profile);
+				if (!result.ok) {
+					log.error(`uninstall ${id} <- ${profile}: ${result.message}`);
+				}
+				results.push(result);
+			}
+		});
+		report.uninstalled = results;
+
+		const failed = results.filter(r => !r.ok);
+		void (failed.length === 0
+			? vscode.window.showInformationMessage(`Uninstalled ${results.length} extension${results.length === 1 ? '' : 's'} from "${profile}".`)
+			: vscode.window.showWarningMessage(`${failed.length} of ${results.length} could not be uninstalled from "${profile}": ${failed.map(r => r.id).join(', ')}.`));
+	}
+
+	const syncProfile = async (args?: { profile?: string; confirm?: boolean; uninstall?: UninstallMode }): Promise<SyncReport | undefined> => {
 		const names = await profileNames();
 		const profile = args?.profile ?? await pickProfile('Sync which profile with its groups?');
 		if (profile === undefined) {
@@ -222,6 +316,8 @@ export function registerGroupCommands({ context, log, api, run = defaultRunner }
 		if (!names.includes(profile)) {
 			throw new Error(`Unknown profile "${profile}". VS Code has: ${names.join(', ')}.`);
 		}
+		// Without prompts (confirm: false) nothing is ever uninstalled unless an explicit list is given.
+		const uninstall: UninstallMode = args?.uninstall ?? (args?.confirm === false ? 'none' : 'ask');
 		const { config } = await loadGroups();
 		const cli = resolveCliOrThrow();
 
@@ -230,42 +326,110 @@ export function registerGroupCommands({ context, log, api, run = defaultRunner }
 		if (plan.missingGroups.length > 0) {
 			void vscode.window.showWarningMessage(`"${profile}" refers to groups that do not exist: ${plan.missingGroups.join(', ')}.`);
 		}
+
+		const report: SyncReport = { profile, plan, results: [] };
 		if (plan.toInstall.length === 0) {
-			void vscode.window.showInformationMessage(`"${profile}" already has every extension of its groups.`);
-			return { profile, plan, results: [] };
-		}
-
-		if (args?.confirm !== false) {
-			const answer = await vscode.window.showInformationMessage(
-				`Install ${plan.toInstall.length} extension${plan.toInstall.length === 1 ? '' : 's'} into "${profile}"?`,
-				{ modal: true, detail: `${plan.toInstall.join('\n')}\n\nNothing is uninstalled.` },
-				'Install',
-			);
-			if (answer !== 'Install') {
-				return { profile, plan, results: [], cancelled: true };
+			if (uninstall === 'none') {
+				void vscode.window.showInformationMessage(`"${profile}" already has every extension of its groups.`);
 			}
-		}
-
-		const results = await withProgress(`Installing into "${profile}"…`, async () => {
-			const done: InstallResult[] = [];
-			for (const id of plan.toInstall) {
-				const result = await installExtension(cli, run, id, profile);
-				if (!result.ok) {
-					log.error(`${id} -> ${profile}: ${result.message}`);
-				}
-				done.push(result);
-			}
-			return done;
-		});
-
-		const failed = results.filter(r => !r.ok);
-		if (failed.length === 0) {
-			void vscode.window.showInformationMessage(`Installed ${results.length} extension${results.length === 1 ? '' : 's'} into "${profile}".`);
 		} else {
-			void vscode.window.showWarningMessage(`${failed.length} of ${results.length} failed for "${profile}": ${failed.map(r => r.id).join(', ')}.`, 'Show Log')
-				.then(choice => choice && log.show());
+			if (args?.confirm !== false && !await ui.confirm(
+				`Install ${plan.toInstall.length} extension${plan.toInstall.length === 1 ? '' : 's'} into "${profile}"?`,
+				plan.toInstall.join('\n'),
+				'Install',
+			)) {
+				return { ...report, cancelled: true };
+			}
+
+			report.results = await withProgress(`Installing into "${profile}"…`, async () => {
+				const done: InstallResult[] = [];
+				for (const id of plan.toInstall) {
+					const result = await installExtension(cli, run, id, profile);
+					if (!result.ok) {
+						log.error(`${id} -> ${profile}: ${result.message}`);
+					}
+					done.push(result);
+				}
+				return done;
+			});
+			const failed = report.results.filter(r => !r.ok);
+			if (failed.length === 0) {
+				void vscode.window.showInformationMessage(`Installed ${report.results.length} extension${report.results.length === 1 ? '' : 's'} into "${profile}".`);
+			} else {
+				void vscode.window.showWarningMessage(`${failed.length} of ${report.results.length} failed for "${profile}": ${failed.map(r => r.id).join(', ')}.`, 'Show Log')
+					.then(choice => choice && log.show());
+			}
 		}
-		return { profile, plan, results };
+
+		if (uninstall !== 'none') {
+			await review(cli, profile, config, uninstall, args?.confirm !== false, report);
+		}
+		return report;
+	};
+
+	// ---- asking to sync when a profile is out of date ---------------------------------------------------
+
+	const dismissed = (): Record<string, string> => context.globalState.get<Record<string, string>>(DISMISSED_KEY, {});
+
+	const resetPrompts = async (): Promise<void> => {
+		await context.globalState.update(DISMISSED_KEY, undefined);
+	};
+
+	let checking = false;
+
+	/** Installs only; removing anything always goes through the explicit sync command and its confirmation. */
+	const checkSync = async (): Promise<void> => {
+		if (checking) {
+			return;
+		}
+		checking = true;
+		try {
+			const mode = settings().get<string>('autoSync') ?? 'ask';
+			if (mode === 'off') {
+				return;
+			}
+			const current = await api.getCurrentProfile();
+			if (!current) {
+				return; // VS Code gives no way to tell which profile this window is in
+			}
+			const profile = current.name;
+			const { config } = await loadGroups();
+			if (desiredExtensions(config, profile).ids.length === 0) {
+				return; // nothing to compare against: do not even start the CLI
+			}
+			const cli = resolveCliOrThrow();
+			const installed = await listExtensions(cli, run, profile);
+			const { toInstall } = planSync(config, profile, installed.map(e => e.id));
+			if (toInstall.length === 0) {
+				return;
+			}
+
+			if (mode === 'auto') {
+				await syncProfile({ profile, confirm: false, uninstall: 'none' });
+				return;
+			}
+			const key = promptKey(toInstall);
+			if (dismissed()[profile] === key) {
+				return;
+			}
+			const preview = toInstall.slice(0, 3).join(', ') + (toInstall.length > 3 ? ', …' : '');
+			const answer = await ui.ask(
+				`"${profile}" is missing ${toInstall.length} extension${toInstall.length === 1 ? '' : 's'} from its groups (${preview}).`,
+				'Sync', 'Not now', 'Stop asking',
+			);
+			if (answer === 'Sync') {
+				await syncProfile({ profile, confirm: false, uninstall: 'ask' });
+			} else if (answer === 'Not now') {
+				await context.globalState.update(DISMISSED_KEY, { ...dismissed(), [profile]: key });
+			} else if (answer === 'Stop asking') {
+				await settings().update('autoSync', 'off', vscode.ConfigurationTarget.Global);
+			}
+		} catch (error) {
+			// background work: it must never turn into an error popup
+			log.warn(`Sync check skipped: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			checking = false;
+		}
 	};
 
 	/** Logs a failure before it reaches the caller, so it is in the Output panel too. */
@@ -279,11 +443,17 @@ export function registerGroupCommands({ context, log, api, run = defaultRunner }
 			}
 		});
 
-	return [
-		logged('better-profiles.editGroups', editGroups),
-		logged('better-profiles.addToGroup', addToGroupCommand),
-		logged('better-profiles.assignGroup', assignGroupCommand),
-		logged('better-profiles.compareProfiles', compareProfiles),
-		logged('better-profiles.syncProfile', syncProfile),
-	];
+	return {
+		disposables: [
+			logged('better-profiles.editGroups', editGroups),
+			logged('better-profiles.addToGroup', addToGroupCommand),
+			logged('better-profiles.assignGroup', assignGroupCommand),
+			logged('better-profiles.compareProfiles', compareProfiles),
+			logged('better-profiles.syncProfile', syncProfile),
+			logged('better-profiles.resetPrompts', resetPrompts),
+		],
+		checkSync,
+		resetPrompts,
+		groupsFilePath,
+	};
 }

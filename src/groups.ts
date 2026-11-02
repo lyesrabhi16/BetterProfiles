@@ -122,15 +122,19 @@ export function assignGroup(config: GroupsConfig, profile: string, group: string
 	};
 }
 
-/** The extensions a profile should have: the "*" groups first, then its own. */
-export function desiredExtensions(config: GroupsConfig, profile: string): { ids: string[]; missingGroups: string[] } {
-	const names = unique([
+/** The groups a profile follows: the "*" groups first, then its own. */
+function assignedGroups(config: GroupsConfig, profile: string): string[] {
+	return unique([
 		...(has(config.profiles, ALL_PROFILES) ? config.profiles[ALL_PROFILES] : []),
 		...(profile !== ALL_PROFILES && has(config.profiles, profile) ? config.profiles[profile] : []),
 	]);
+}
+
+/** The extensions a profile should have, and the groups it refers to that do not exist. */
+export function desiredExtensions(config: GroupsConfig, profile: string): { ids: string[]; missingGroups: string[] } {
 	const ids: string[] = [];
 	const missingGroups: string[] = [];
-	for (const name of names) {
+	for (const name of assignedGroups(config, profile)) {
 		if (has(config.groups, name)) {
 			ids.push(...config.groups[name]);
 		} else {
@@ -190,16 +194,34 @@ export interface CleanupPlan {
  * Offered only when the groups fully describe the profile: with no groups, or a group that does not exist,
  * "everything else" would be a guess.
  */
-export function planCleanup(_config: GroupsConfig, _profile: string, _installedIds: string[], _protectedIds: string[]): CleanupPlan {
-	throw new Error('not implemented');
+export function planCleanup(config: GroupsConfig, profile: string, installedIds: string[], protectedIds: string[]): CleanupPlan {
+	if (assignedGroups(config, profile).length === 0) {
+		return { managed: false, reason: 'no-groups', extras: [] };
+	}
+	const { ids, missingGroups } = desiredExtensions(config, profile);
+	if (missingGroups.length > 0) {
+		return { managed: false, reason: 'missing-groups', extras: [] };
+	}
+	if (ids.length === 0) {
+		return { managed: false, reason: 'no-groups', extras: [] };
+	}
+	const keep = new Set([...ids, ...protectedIds].map(id => id.toLowerCase()));
+	const extras = unique(installedIds)
+		.filter(id => !keep.has(id.toLowerCase()))
+		.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+	return { managed: true, extras };
 }
 
 /** The ids present in every list. Extensions VS Code installs for all profiles at once show up in all of them. */
-export function commonToAllProfiles(_lists: string[][]): string[] {
-	throw new Error('not implemented');
+export function commonToAllProfiles(lists: string[][]): string[] {
+	if (lists.length === 0) {
+		return [];
+	}
+	const sets = lists.map(list => new Set(list.map(id => id.toLowerCase())));
+	return [...sets[0]].filter(id => sets.every(set => set.has(id)));
 }
 
 /** Identifies a set of ids, so "Not now" can be remembered for exactly that set. */
-export function promptKey(_ids: string[]): string {
-	throw new Error('not implemented');
+export function promptKey(ids: string[]): string {
+	return unique(ids).map(id => id.toLowerCase()).sort().join(',');
 }

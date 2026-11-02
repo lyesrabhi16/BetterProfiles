@@ -50,6 +50,11 @@
         "command": "better-profiles.editGroups",
         "title": "Edit Groups File",
         "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.resetPrompts",
+        "title": "Reset Sync Prompts",
+        "category": "Better Profiles"
       }
     ],
     "configuration": {
@@ -58,27 +63,54 @@
         "betterProfiles.storageFile": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
           "markdownDescription": "Advanced. Path to VS Code's `storage.json`, where profiles and their workspace associations are recorded. Leave empty to use the one next to this extension's global storage."
         },
         "betterProfiles.groupsFile": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
           "markdownDescription": "Where your extension groups are kept. Leave empty to use `groups.json` in this extension's global storage, which every profile shares. Point it into a dotfiles repository to version it."
         },
         "betterProfiles.codeCommand": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
           "markdownDescription": "Advanced. An executable to run instead of this VS Code's own command line (for example a custom build). Used to list and install extensions per profile. Leave empty to use the built-in one."
         },
         "betterProfiles.codeArgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
-          "scope": "machine",
+          "scope": "application",
           "markdownDescription": "Advanced. Arguments that always come first when `#betterProfiles.codeCommand#` runs, for example `--user-data-dir` and `--extensions-dir` for a portable or non-default installation."
+        },
+        "betterProfiles.autoSync": {
+          "type": "string",
+          "enum": [
+            "off",
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Never check whether a profile has the extensions of its groups.",
+            "Shortly after startup, ask before installing what the current profile is missing.",
+            "Install what the current profile is missing without asking. Nothing is ever uninstalled automatically."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "markdownDescription": "Whether the current profile is brought up to date with its extension groups. Uninstalling is never automatic: it only happens through `Better Profiles: Sync Profile With Its Groups…`, which lists what would go and asks first."
+        },
+        "betterProfiles.keepExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "Extension ids (`publisher.name`) that are never offered for uninstalling, even when no group mentions them."
         }
       }
     }

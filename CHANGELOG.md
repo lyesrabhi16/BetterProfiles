@@ -4,6 +4,11 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- The extension's settings are now application-scoped (shared by all profiles, still impossible to set from a
+  workspace). They were machine-scoped, which is still per profile.
+
 ### Fixed
 
 - The status bar showed `Default` in a non-default profile whenever the folder path had spaces or accents,
@@ -16,9 +21,17 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Staying in sync: shortly after startup, and when the groups file is saved, the current profile is checked against
+  its groups. `betterProfiles.autoSync` is `ask` (default: Sync / Not now / Stop asking, and "Not now" is remembered
+  for that exact set), `auto` or `off`. The automatic check only installs. `Reset Sync Prompts` clears the memory.
+- Uninstalling extensions a profile has but its groups do not mention: only through `Sync Profile With Its Groups…`,
+  as a checkbox list with nothing ticked followed by a confirmation. Extensions every profile has (application
+  scoped), this extension and `betterProfiles.keepExtensions` are never offered; neither is a profile whose groups
+  are incomplete.
+- `betterProfiles.autoSync` and `betterProfiles.keepExtensions` settings.
 - Extension groups: `Add Extensions To Group…`, `Give A Group To A Profile…`, `Compare Extensions Across Profiles`,
   `Sync Profile With Its Groups…` and `Edit Groups File`, plus the `betterProfiles.groupsFile`,
-  `betterProfiles.codeCommand` and `betterProfiles.codeArgs` settings. Sync only installs, never removes.
+  `betterProfiles.codeCommand` and `betterProfiles.codeArgs` settings.
 - `Better Profiles: Switch Profile` command (the status bar item runs it).
 - `activate()` returns a small API; `betterProfiles.storageFile` setting.
 - A README, unit tests for the detection logic, and Extension Host tests that run against a real VS Code.

@@ -1,8 +1,9 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type { BetterProfilesApi, PromptUi } from './api';
+import type { BetterProfilesApi } from './api';
 import { registerGroupCommands } from './groupCommands';
+import { createUi } from './ui';
 import {
 	Detection,
 	Profile,
@@ -52,6 +53,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		statusBarItem.show();
 	};
 
+	const ui = createUi();
+
 	const api: BetterProfilesApi = {
 		async getCurrentProfile(): Promise<Profile | undefined> {
 			const detection = await detect();
@@ -61,12 +64,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 			return (await readStorage()).profiles;
 		},
 		refresh,
-		// not built yet
-		checkSync: async () => { throw new Error('not implemented'); },
-		resetPrompts: async () => { throw new Error('not implemented'); },
-		ui: {} as PromptUi,
+		checkSync: () => groups.checkSync(),
+		resetPrompts: () => groups.resetPrompts(),
+		ui,
 		statusBarItem,
 	};
+
+	const groups = registerGroupCommands({ context, log, api, ui });
 
 	context.subscriptions.push(
 		log,
@@ -86,10 +90,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		// A profile can be renamed or re-iconed from another window.
 		vscode.window.onDidChangeWindowState(state => state.focused && void refresh()),
 		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),
-		...registerGroupCommands({ context, log, api }),
+		...groups.disposables,
+		// editing the groups file by hand: check again when it is saved
+		vscode.workspace.onDidSaveTextDocument(doc => doc.uri.fsPath === groups.groupsFilePath() && void groups.checkSync()),
 	);
 
 	await refresh();
+
+	// Shortly after startup, look whether this profile has all the extensions of its groups.
+	// Not under test: the tests call checkSync() themselves, and a timer would race with them.
+	if (context.extensionMode !== vscode.ExtensionMode.Test) {
+		const timer = setTimeout(() => void groups.checkSync(), 4000);
+		context.subscriptions.push({ dispose: () => clearTimeout(timer) });
+	}
 	return api;
 }
 

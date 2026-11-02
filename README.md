@@ -30,6 +30,8 @@ That file is internal and undocumented, so a future VS Code release could change
 |---|---|---|
 | `betterProfiles.storageFile` | empty | Advanced. Path to a different `storage.json`. Empty means the one next to the extension's global storage. |
 | `betterProfiles.groupsFile` | empty | Where the extension groups are kept. Empty means `groups.json` in the extension's global storage. |
+| `betterProfiles.autoSync` | `ask` | `off`, `ask` or `auto`: what to do when the current profile lacks extensions of its groups. See [Staying in sync](#staying-in-sync). |
+| `betterProfiles.keepExtensions` | `[]` | Extension ids that are never offered for uninstalling. |
 | `betterProfiles.codeCommand` | empty | Advanced. Run this executable instead of VS Code's own command line to list and install extensions. |
 | `betterProfiles.codeArgs` | `[]` | Advanced. Arguments that always come first for `codeCommand`, for example `--user-data-dir` and `--extensions-dir`. |
 
@@ -43,7 +45,8 @@ several places. Groups let you name a set once and give it to the profiles that 
 | `Better Profiles: Add Extensions To Group…` | Pick a group (or make one) and tick extensions from a profile that already has them. |
 | `Better Profiles: Give A Group To A Profile…` | Make a profile (or all of them) follow a group. |
 | `Better Profiles: Compare Extensions Across Profiles` | Opens a table: one row per extension, one column per profile. |
-| `Better Profiles: Sync Profile With Its Groups…` | Shows what is missing from a profile and installs it after you confirm. |
+| `Better Profiles: Sync Profile With Its Groups…` | Installs what a profile is missing (after you confirm), then offers to uninstall what its groups do not mention (you tick what goes). |
+| `Better Profiles: Reset Sync Prompts` | Forget "Not now" answers so the prompt below can appear again. |
 | `Better Profiles: Edit Groups File` | Opens the JSON file below. |
 
 The groups live in one file shared by every profile (VS Code settings are per profile, which would split them):
@@ -64,16 +67,46 @@ The groups live in one file shared by every profile (VS Code settings are per pr
 `"*"` means every profile; `Default` is the default profile. The file is in this extension's global storage unless
 `betterProfiles.groupsFile` points elsewhere (for example into a dotfiles repository).
 
-**Sync only adds.** It never uninstalls or disables anything, and it skips what the profile already has.
 Extensions VS Code installs once for all profiles ("application scoped") count as present everywhere, and they
 show up in every column of the comparison.
+
+### Staying in sync
+
+Shortly after startup, and whenever you save the groups file, Better Profiles checks whether this window's profile
+has every extension of its groups. What happens next is `betterProfiles.autoSync`:
+
+- `ask` (default): a notification names the profile and what is missing, with **Sync**, **Not now** and **Stop asking**.
+  *Not now* is remembered for that exact set of extensions, so it does not nag until the set changes
+  (`Reset Sync Prompts` clears it). *Stop asking* sets `autoSync` to `off`.
+- `auto`: installs what is missing without asking.
+- `off`: never checks.
+
+Nothing is checked, and no command line is started, for a profile that has no groups, or when the window's
+profile cannot be determined (see Known limits). **The automatic check only ever installs.**
+
+### Uninstalling
+
+Removing extensions is never automatic. It only happens through `Sync Profile With Its Groups…` (also offered after
+you click **Sync** in the notification), in three steps: a checkbox list of the *extras* with **nothing ticked**,
+you tick what should go, then a confirmation that lists exactly those.
+
+An extra is an extension the profile has that none of its groups mention. The list is only offered when the groups
+describe the profile completely, that is the profile has groups and every group it refers to exists. These are never
+offered, whatever the groups say:
+
+- extensions that every profile has, because VS Code installs some once for all profiles ("application scoped")
+  and removing one from a single profile would remove it everywhere;
+- this extension itself;
+- anything in `betterProfiles.keepExtensions`.
+
+A failed uninstall (for example because another extension depends on it) is reported and the rest still run.
 
 **How it installs.** VS Code has no extension API for installing into another profile, so it runs VS Code's own
 command line, `--list-extensions` and `--install-extension` with `--profile`, the same way the `code` launcher does,
 and always against *this* VS Code's user-data and extensions folders. If it cannot tell which extensions folder
 that is, it stops and tells you instead of guessing. Extension ids are checked first (`publisher.name`, never a
 flag or a file path). `betterProfiles.codeCommand` and `betterProfiles.codeArgs` let you point it at another build
-or a portable install; both are machine-scoped, so a workspace cannot set them.
+or a portable install; both are application-scoped: shared by every profile, and a workspace cannot set them.
 
 Every command also accepts arguments, so it can be driven without prompts (see `src/groupCommands.ts`).
 
@@ -88,6 +121,8 @@ Every command also accepts arguments, so it can be driven without prompts (see `
 - **Empty windows** cannot be identified, and neither can windows VS Code has not recorded yet. This includes
   Extension Development Host windows, which never record their profile.
 - Remote windows (SSH, WSL, containers) are untested.
+- The startup timer of the automatic check is not covered by the tests (they call `checkSync()` directly, because a
+  timer would race with them). The notification and the checkbox list were checked on screen in a scratch VS Code.
 - Whether a window already open in a profile picks up extensions installed into it by a sync without a reload is
   untested.
 

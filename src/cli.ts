@@ -138,13 +138,13 @@ export async function listExtensions(cli: CliInvocation, runner: Runner, profile
 	return parseExtensionList(result.stdout);
 }
 
-/** Never throws for a failed install, so one bad extension does not stop the rest of a sync. */
-export async function installExtension(cli: CliInvocation, runner: Runner, id: string, profile?: string): Promise<InstallResult> {
+/** Runs one install or uninstall. Never throws, so one bad extension does not stop the rest of a batch. */
+async function changeExtension(cli: CliInvocation, runner: Runner, id: string, args: string[]): Promise<InstallResult> {
 	if (!isExtensionId(id)) {
 		return { id, ok: false, message: `"${id}" is not a valid extension id (expected publisher.name).` };
 	}
 	try {
-		const result = await run(cli, runner, installArgs(id, profile));
+		const result = await run(cli, runner, args);
 		return result.code === 0
 			? { id, ok: true, message: lastLine(result.stdout) }
 			: { id, ok: false, message: firstLine(result.stderr) || firstLine(result.stdout) || `The CLI exited with code ${result.code}.` };
@@ -152,6 +152,12 @@ export async function installExtension(cli: CliInvocation, runner: Runner, id: s
 		return { id, ok: false, message: error instanceof Error ? error.message : String(error) };
 	}
 }
+
+export const installExtension = (cli: CliInvocation, runner: Runner, id: string, profile?: string): Promise<InstallResult> =>
+	changeExtension(cli, runner, id, installArgs(id, profile));
+
+export const uninstallExtension = (cli: CliInvocation, runner: Runner, id: string, profile?: string): Promise<InstallResult> =>
+	changeExtension(cli, runner, id, uninstallArgs(id, profile));
 
 /** Real runner: the CLI is slow to start but never needs a shell, so arguments are passed as they are. */
 export const defaultRunner: Runner = (command, args, env) =>
@@ -175,10 +181,6 @@ export function isInstalledExtensionPath(id: string, extensionPath: string): boo
 	return folder.startsWith(prefix) && /^\d/.test(folder.slice(prefix.length));
 }
 
-export function uninstallArgs(_id: string, _profile?: string): string[] {
-	throw new Error('not implemented');
-}
-
-export async function uninstallExtension(_cli: CliInvocation, _run: Runner, _id: string, _profile?: string): Promise<InstallResult> {
-	throw new Error('not implemented');
+export function uninstallArgs(id: string, profile?: string): string[] {
+	return ['--uninstall-extension', id, ...profileArgs(profile)];
 }
