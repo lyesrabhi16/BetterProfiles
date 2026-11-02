@@ -22,10 +22,22 @@
   "contributes": {
     "commands": [
       {
-        "command": "better-profiles.activate",
-        "title": "EW: Activate Extension"
+        "command": "better-profiles.switchProfile",
+        "title": "Switch Profile",
+        "category": "Better Profiles"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Better Profiles",
+      "properties": {
+        "betterProfiles.storageFile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Advanced. Path to VS Code's `storage.json`, where profiles and their workspace associations are recorded. Leave empty to use the one next to this extension's global storage."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

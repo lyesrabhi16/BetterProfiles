@@ -1,137 +1,90 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-import { rejects } from 'assert';
-import { exec } from 'child_process';
-import path, { resolve } from 'path';
-import { stderr, stdout } from 'process';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import * as vscode from 'vscode';
-import * as fs from 'fs';
+import type { BetterProfilesApi } from './api';
+import {
+	Detection,
+	Profile,
+	StorageSnapshot,
+	detectProfile,
+	parseStorage,
+	statusText,
+	statusTooltip,
+} from './profiles';
 
-type Profile = {
-	name: string;
-	location: string;
-	icon: string;
-	useDefaultFlags?: object;
-}
+const SWITCH_COMMAND = 'better-profiles.switchProfile';
+const BUILTIN_SWITCHER = 'workbench.profiles.actions.switchProfile';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export async function activate(context: vscode.ExtensionContext) {
-	console.log("Extension 'better-profiles' is now active!");
-	
-	const getProfileFromLocation = async (profile: string) => {
-		return new Promise<Profile|undefined>((resolve, reject) => {
-			const user_dir_path =  path.join(context.globalStorageUri.fsPath, '../..');
-		const global_storage_file = user_dir_path + '/globalStorage/storage.json';
-		console.log("user_dir: ", user_dir_path);
-		console.log("globalstoragefile: ", global_storage_file);
-		fs.readFile(global_storage_file, 'utf8', (err, data) => {
-			if (err) {
-				console.error("Error reading the file:", err);
-				reject(undefined);
-				return;
-			}
-			try {
-				const storage = JSON.parse(data);
-				const profiles = storage["userDataProfiles"];
-				for (const profile_obj of profiles) {
-					if (profile_obj.location === profile) {
-						resolve(profile_obj);
-					}
-				}
-				resolve({
-					name: "Default",
-					location: "Unknown",
-					icon: "settings-view-bar-icon",
-				});
-			} catch (parseErr) {
-				console.error("Error parsing JSON data:", parseErr);
-				reject(undefined);
-			}
-		});
-		});
+export async function activate(context: vscode.ExtensionContext): Promise<BetterProfilesApi> {
+	const log = vscode.window.createOutputChannel('Better Profiles', { log: true });
+	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99999999);
+	statusBarItem.command = SWITCH_COMMAND;
+
+	/** VS Code's `storage.json` sits next to the folder our global storage lives in. */
+	const storageFile = (): string => {
+		const configured = vscode.workspace.getConfiguration('betterProfiles').get<string>('storageFile')?.trim();
+		return configured || path.join(path.dirname(context.globalStorageUri.fsPath), 'storage.json');
 	};
 
-	const disposable_get_profiles = vscode.commands.registerCommand('better-profiles.getProfiles', async () => {
-		console.log("Command 'better-profiles.getProfiles' is now active!");
-		const user_dir_path =  path.join(context.globalStorageUri.fsPath, '../..');
-		const global_storage_file = user_dir_path + '/globalStorage/storage.json';
-		console.log("user_dir: ", user_dir_path);
-		console.log("globalstoragefile: ", global_storage_file);
-		fs.readFile(global_storage_file, 'utf8', (err, data) => {
-			if (err) {
-				console.error("Error reading the file:", err);
-				return;
-			}
+	const readStorage = async (): Promise<StorageSnapshot> => {
+		const file = storageFile();
+		try {
+			return parseStorage(await fs.readFile(file, 'utf8'));
+		} catch (error) {
+			log.error(`Could not read ${file}: ${error instanceof Error ? error.message : String(error)}`);
+			return { profiles: [], workspaces: {} };
+		}
+	};
+
+	// Uri.toString() is the exact form VS Code uses for its association keys (percent-encoded).
+	const windowContext = () => ({
+		workspaceFile: vscode.workspace.workspaceFile?.toString(),
+		folders: (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.toString()),
+	});
+
+	const detect = async (): Promise<Detection> => detectProfile(await readStorage(), windowContext());
+
+	const refresh = async (): Promise<void> => {
+		const detection = await detect();
+		statusBarItem.text = statusText(detection);
+		statusBarItem.tooltip = statusTooltip(detection);
+		statusBarItem.show();
+	};
+
+	const api: BetterProfilesApi = {
+		async getCurrentProfile(): Promise<Profile | undefined> {
+			const detection = await detect();
+			return detection.kind === 'unknown' ? undefined : detection.profile;
+		},
+		async getProfiles(): Promise<Profile[]> {
+			return (await readStorage()).profiles;
+		},
+		refresh,
+		statusBarItem,
+	};
+
+	context.subscriptions.push(
+		log,
+		statusBarItem,
+		vscode.commands.registerCommand(SWITCH_COMMAND, async () => {
 			try {
-				const storage = JSON.parse(data);
-				const profiles = storage["userDataProfiles"];
-				const profile_names =new Set();
-				for (const profile of profiles) {
-					profile_names.add(profile["name"]);
-				}
-				vscode.window.showInformationMessage("Profiles: " + [...profile_names].join(", "));
-				return [...profiles];
-
-			} catch (parseErr) {
-				console.error("Error parsing JSON data:", parseErr);
+				await vscode.commands.executeCommand(BUILTIN_SWITCHER);
+			} catch (error) {
+				log.error(`Could not open the profile switcher: ${String(error)}`);
+				void vscode.window.showErrorMessage('Better Profiles: this version of VS Code has no profile switcher command.');
 			}
-		});
-	});
-	
-	const disposable = vscode.commands.registerCommand('better-profiles.getCurrentProfile', async () => {
-		console.log("Command 'better-profiles.activate' is now active!");
-		const user_dir_path =  path.join(context.globalStorageUri.fsPath, '../..');
-		const global_storage_file = user_dir_path + '/globalStorage/storage.json';
-		console.log("user_dir: ", user_dir_path);
-		console.log("globalstoragefile: ", global_storage_file);
-		return new Promise<Profile|undefined>((resolve) => {
-			fs.readFile(global_storage_file, 'utf8', async (err, data) => {
-				if (err) {
-					console.error("Error reading the file:", err);
-					resolve(undefined);
-					return;
-				}
-				console.log("workspace_name:"+vscode.workspace.name);
-				const workspace_path = "file://"+vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-				
-				try {
-					const storage = JSON.parse(data);
-					const workspaces = storage["profileAssociations"]["workspaces"];
-					const active_profile = await getProfileFromLocation(workspaces[workspace_path]);
-					
-					resolve(active_profile);
-	
-				} catch (parseErr) {
-					console.error("Error parsing JSON data:", parseErr);
-					resolve(undefined);
-				}
-	
-			});
-		});
-		
-		
-	});
-	
+		}),
+		// Kept for keybindings and other extensions; the same data as the exported API.
+		vscode.commands.registerCommand('better-profiles.getCurrentProfile', () => api.getCurrentProfile()),
+		vscode.commands.registerCommand('better-profiles.getProfiles', () => api.getProfiles()),
+		vscode.workspace.onDidChangeWorkspaceFolders(() => void refresh()),
+		// A profile can be renamed or re-iconed from another window.
+		vscode.window.onDidChangeWindowState(state => state.focused && void refresh()),
+		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),
+	);
 
-	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99999999);
-	const current_profile = await vscode.commands.executeCommand('better-profiles.getCurrentProfile') as Profile;
-	if (current_profile !== undefined) {
-		statusBarItem.text = `$(${current_profile.icon}) ${current_profile.name}`;
-	}
-	else{
-		statusBarItem.text = `$(settings-view-bar-icon) Default`;
-	}
-	statusBarItem.command = 'workbench.profiles.actions.switchProfile';
-	statusBarItem.show();
-
-	context.subscriptions.push(disposable);
-	context.subscriptions.push(disposable_get_profiles);
-	context.subscriptions.push(statusBarItem);
-	await vscode.commands.executeCommand('better-profiles.getCurrentProfile');
-
+	await refresh();
+	return api;
 }
 
-// This method is called when your extension is deactivated
-export function deactivate() {
-}
+export function deactivate() { }

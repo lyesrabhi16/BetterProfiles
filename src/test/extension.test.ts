@@ -87,6 +87,11 @@ suite('Better Profiles in a real Extension Host', () => {
 			assert.strictEqual(typeof api.statusBarItem.command === 'string' ? api.statusBarItem.command : api.statusBarItem.command?.command, 'better-profiles.switchProfile');
 		});
 
+		test('the built-in profile switcher it delegates to exists in this VS Code', async () => {
+			const registered = await vscode.commands.getCommands(true);
+			assert.ok(registered.includes('workbench.profiles.actions.switchProfile'));
+		});
+
 		test('declares the betterProfiles.storageFile setting', () => {
 			const props = getExtension().packageJSON.contributes?.configuration?.properties ?? {};
 			assert.ok('betterProfiles.storageFile' in props);
@@ -135,11 +140,29 @@ suite('Better Profiles in a real Extension Host', () => {
 			assert.strictEqual(api.statusBarItem.text, `$(${DEFAULT_ICON}) Agents`);
 		});
 
+		test('changing the storageFile setting updates the status bar without calling refresh()', async () => {
+			const api = await getApi();
+			await useStorage(storage([PYTHON], { [workspaceKey()]: PYTHON.location }));
+			const deadline = Date.now() + 5000;
+			while (api.statusBarItem.text !== '$(snake) Python' && Date.now() < deadline) {
+				await new Promise(resolve => setTimeout(resolve, 50));
+			}
+			assert.strictEqual(api.statusBarItem.text, '$(snake) Python');
+		});
+
 		test('getProfiles() returns every profile in the storage file', async () => {
 			await useStorage(storage([PYTHON, NO_ICON], {}));
 			const api = await getApi();
 			await api.refresh();
 			assert.deepStrictEqual((await api.getProfiles()).map(p => p.name), ['Python', 'Agents']);
+		});
+
+		test('getCurrentProfile and getProfiles stay available as commands and match the API', async () => {
+			await useStorage(storage([PYTHON], { [workspaceKey()]: PYTHON.location }));
+			const api = await getApi();
+			await api.refresh();
+			assert.deepStrictEqual(await vscode.commands.executeCommand('better-profiles.getCurrentProfile'), await api.getCurrentProfile());
+			assert.deepStrictEqual(await vscode.commands.executeCommand('better-profiles.getProfiles'), await api.getProfiles());
 		});
 
 		test('getProfiles() is empty when there are no custom profiles', async () => {
