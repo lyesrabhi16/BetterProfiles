@@ -176,3 +176,30 @@ export function renderMatrix(columns: MatrixColumn[]): string {
 	];
 	return lines.join('\n') + '\n';
 }
+
+export interface CleanupPlan {
+	/** Cleanup is only offered for a profile that has groups, all of them defined. */
+	managed: boolean;
+	reason?: 'no-groups' | 'missing-groups';
+	/** Installed in the profile but in none of its groups, and not protected. */
+	extras: string[];
+}
+
+/**
+ * Extensions a profile has that its groups do not. Anything in `protectedIds` is never an extra.
+ * Offered only when the groups fully describe the profile: with no groups, or a group that does not exist,
+ * "everything else" would be a guess.
+ */
+export function planCleanup(_config: GroupsConfig, _profile: string, _installedIds: string[], _protectedIds: string[]): CleanupPlan {
+	throw new Error('not implemented');
+}
+
+/** The ids present in every list. Extensions VS Code installs for all profiles at once show up in all of them. */
+export function commonToAllProfiles(_lists: string[][]): string[] {
+	throw new Error('not implemented');
+}
+
+/** Identifies a set of ids, so "Not now" can be remembered for exactly that set. */
+export function promptKey(_ids: string[]): string {
+	throw new Error('not implemented');
+}

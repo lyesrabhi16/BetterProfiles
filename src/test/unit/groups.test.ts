@@ -3,6 +3,9 @@ import {
 	ALL_PROFILES,
 	GroupsConfig,
 	addToGroup,
+	commonToAllProfiles,
+	planCleanup,
+	promptKey,
 	assignGroup,
 	desiredExtensions,
 	emptyGroups,
@@ -200,5 +203,81 @@ suite('renderMatrix', () => {
 	test('profile names cannot break the table', () => {
 		const md = renderMatrix([{ profile: 'a|b', ids: ['x.y'] }]);
 		assert.ok(md.includes('a\\|b'), md);
+	});
+});
+
+suite('planCleanup', () => {
+	const c = config({ py: ['p.keep', 'P.Other'], common: ['c.one'] }, { '*': ['common'], Python: ['py'] });
+
+	test('extras are installed extensions that none of the profile groups mention', () => {
+		const plan = planCleanup(c, 'Python', ['p.keep', 'c.one', 'x.extra', 'y.extra'], []);
+		assert.deepStrictEqual(plan, { managed: true, extras: ['x.extra', 'y.extra'] });
+	});
+
+	test('ids are compared case-insensitively and extras keep the installed spelling, sorted', () => {
+		const plan = planCleanup(c, 'Python', ['p.OTHER', 'Z.Last', 'a.first'], []);
+		assert.deepStrictEqual(plan.extras, ['a.first', 'Z.Last']);
+	});
+
+	test('protected ids are never extras (application-scoped extensions, this extension, "keep" list)', () => {
+		const plan = planCleanup(c, 'Python', ['shared.x', 'LyesRabhi.better-profiles', 'x.extra'], ['SHARED.x', 'lyesrabhi.better-profiles']);
+		assert.deepStrictEqual(plan.extras, ['x.extra']);
+	});
+
+	test('a profile with no groups is not managed, so nothing is an extra', () => {
+		const plan = planCleanup(c, 'Rust', ['r.one'], []);
+		assert.strictEqual(plan.managed, true, 'Rust still gets the "*" group');
+		const none = planCleanup(config({ g: ['a.b'] }, {}), 'Rust', ['r.one', 'r.two'], []);
+		assert.deepStrictEqual(none, { managed: false, reason: 'no-groups', extras: [] });
+	});
+
+	test('a group that is assigned but not defined blocks cleanup: the list of wanted extensions is incomplete', () => {
+		const plan = planCleanup(config({ g: ['a.b'] }, { Python: ['g', 'ghost'] }), 'Python', ['x.extra'], []);
+		assert.deepStrictEqual(plan, { managed: false, reason: 'missing-groups', extras: [] });
+	});
+
+	test('groups that exist but are empty give nothing to compare against, so they do not manage the profile', () => {
+		const plan = planCleanup(config({ empty: [] }, { Python: ['empty'] }), 'Python', ['x.extra'], []);
+		assert.deepStrictEqual(plan, { managed: false, reason: 'no-groups', extras: [] });
+	});
+
+	test('nothing installed means nothing to remove', () => {
+		assert.deepStrictEqual(planCleanup(c, 'Python', [], []).extras, []);
+	});
+
+	test('does not change the install plan: planSync still never mentions removals', () => {
+		assert.deepStrictEqual(Object.keys(planSync(c, 'Python', ['x.extra'])).sort(), ['alreadyInstalled', 'missingGroups', 'toInstall']);
+	});
+});
+
+suite('commonToAllProfiles', () => {
+	test('is what every list has, comparing case-insensitively', () => {
+		assert.deepStrictEqual(commonToAllProfiles([['a.b', 'C.D', 'x.only'], ['c.d', 'a.b'], ['A.B', 'c.d', 'y.only']]).sort(), ['a.b', 'c.d']);
+	});
+
+	test('an extension missing from even one profile is not common', () => {
+		assert.deepStrictEqual(commonToAllProfiles([['a.b', 'c.d'], ['a.b'], []]), []);
+	});
+
+	test('no lists means nothing is common', () => {
+		assert.deepStrictEqual(commonToAllProfiles([]), []);
+	});
+
+	test('one list is common to itself', () => {
+		assert.deepStrictEqual(commonToAllProfiles([['a.b', 'c.d']]).sort(), ['a.b', 'c.d']);
+	});
+});
+
+suite('promptKey', () => {
+	test('is the same for the same set whatever the order or case', () => {
+		assert.strictEqual(promptKey(['B.two', 'a.one']), promptKey(['A.ONE', 'b.two']));
+	});
+
+	test('differs when the set differs', () => {
+		assert.notStrictEqual(promptKey(['a.one']), promptKey(['a.one', 'b.two']));
+	});
+
+	test('an empty set has a stable key', () => {
+		assert.strictEqual(promptKey([]), promptKey([]));
 	});
 });

@@ -174,3 +174,11 @@ export function isInstalledExtensionPath(id: string, extensionPath: string): boo
 	const prefix = `${id.toLowerCase()}-`;
 	return folder.startsWith(prefix) && /^\d/.test(folder.slice(prefix.length));
 }
+
+export function uninstallArgs(_id: string, _profile?: string): string[] {
+	throw new Error('not implemented');
+}
+
+export async function uninstallExtension(_cli: CliInvocation, _run: Runner, _id: string, _profile?: string): Promise<InstallResult> {
+	throw new Error('not implemented');
+}

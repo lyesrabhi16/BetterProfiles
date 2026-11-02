@@ -7,6 +7,8 @@ import {
 	installArgs,
 	isInstalledExtensionPath,
 	installExtension,
+	uninstallArgs,
+	uninstallExtension,
 	listArgs,
 	listExtensions,
 	parseExtensionList,
@@ -185,5 +187,37 @@ suite('isInstalledExtensionPath', () => {
 	test('a folder that merely starts with the id is not enough: a version must follow', () => {
 		assert.ok(!isInstalledExtensionPath('a.b', '/ex/a.b-c.d-1.0.0'));
 		assert.ok(!isInstalledExtensionPath('a.b', '/ex/a.b'));
+	});
+});
+
+suite('uninstallArgs', () => {
+	test('uninstalls one extension, with --profile only for a named profile, as separate arguments', () => {
+		assert.deepStrictEqual(uninstallArgs('a.b'), ['--uninstall-extension', 'a.b']);
+		assert.deepStrictEqual(uninstallArgs('a.b', 'Default'), ['--uninstall-extension', 'a.b']);
+		assert.deepStrictEqual(uninstallArgs('a.b', 'My Python'), ['--uninstall-extension', 'a.b', '--profile', 'My Python']);
+	});
+});
+
+suite('uninstallExtension', () => {
+	test('runs the CLI for that profile and reports success', async () => {
+		const { run, calls } = fakeRunner({ stdout: "Uninstalling a.b...\nExtension 'a.b' was successfully uninstalled!\n" });
+		const r = await uninstallExtension(cli, run, 'a.b', 'Python');
+		assert.strictEqual(r.ok, true);
+		assert.deepStrictEqual(calls[0].args, [...cli.args, '--uninstall-extension', 'a.b', '--profile', 'Python']);
+	});
+
+	test('reports a failure (for example a dependency) without throwing', async () => {
+		const { run } = fakeRunner({ code: 1, stderr: "Cannot uninstall extension 'a.b'. Extension 'c.d' depends on this.\n" });
+		const r = await uninstallExtension(cli, run, 'a.b');
+		assert.strictEqual(r.ok, false);
+		assert.ok(r.message.includes('depends on this'), r.message);
+	});
+
+	test('never passes anything that is not a plain extension id', async () => {
+		const { run, calls } = fakeRunner({});
+		for (const bad of ['--install-extension', '-x.y', '../evil.vsix', '/tmp/a.vsix', 'python', 'evil.vsix']) {
+			assert.strictEqual((await uninstallExtension(cli, run, bad, 'Python')).ok, false, bad);
+		}
+		assert.deepStrictEqual(calls, []);
 	});
 });

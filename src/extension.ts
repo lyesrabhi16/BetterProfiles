@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type { BetterProfilesApi } from './api';
+import type { BetterProfilesApi, PromptUi } from './api';
 import { registerGroupCommands } from './groupCommands';
 import {
 	Detection,
@@ -61,6 +61,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 			return (await readStorage()).profiles;
 		},
 		refresh,
+		// not built yet
+		checkSync: async () => { throw new Error('not implemented'); },
+		resetPrompts: async () => { throw new Error('not implemented'); },
+		ui: {} as PromptUi,
 		statusBarItem,
 	};
 

@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { GroupsConfig, SyncPlan } from '../groups';
 import type { InstallResult } from '../cli';
+import type { BetterProfilesApi, PickItem } from '../api';
 
 // Extension groups, in a real Extension Host, against a FAKE CLI (test-fixtures/stub-code.js).
 // Nothing here runs a real VS Code CLI, so nothing can touch real profiles or extensions.
@@ -20,6 +21,8 @@ interface SyncReport {
 	plan: SyncPlan;
 	results: InstallResult[];
 	cancelled?: boolean;
+	extras?: string[];
+	uninstalled?: InstallResult[];
 }
 
 /** executeCommand returns a Thenable; assert.rejects wants a real Promise. */
@@ -59,7 +62,7 @@ suite('Extension groups against a fake CLI', () => {
 		writeState({ Default: ['common.one'], Python: ['p.installed'], Agents: [] });
 
 		const storage = path.join(dir, 'storage.json');
-		fs.writeFileSync(storage, JSON.stringify({ userDataProfiles: [PYTHON, AGENTS], profileAssociations: { workspaces: {} } }));
+		fs.writeFileSync(storage, JSON.stringify({ userDataProfiles: [PYTHON, AGENTS], profileAssociations: { workspaces: { [vscode.workspace.workspaceFolders![0].uri.toString()]: PYTHON.location } } }));
 		await set('storageFile', storage);
 		await set('groupsFile', groupsFile);
 		await set('codeCommand', process.execPath);
@@ -67,14 +70,14 @@ suite('Extension groups against a fake CLI', () => {
 	});
 
 	teardown(async () => {
-		for (const key of ['storageFile', 'groupsFile', 'codeCommand', 'codeArgs']) {
+		for (const key of ['storageFile', 'groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions']) {
 			await set(key, undefined);
 		}
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
 	suite('commands', () => {
-		const IDS = ['editGroups', 'addToGroup', 'assignGroup', 'compareProfiles', 'syncProfile'].map(c => `better-profiles.${c}`);
+		const IDS = ['editGroups', 'addToGroup', 'assignGroup', 'compareProfiles', 'syncProfile', 'resetPrompts'].map(c => `better-profiles.${c}`);
 
 		test('are contributed to the palette and registered', async () => {
 			const ext = vscode.extensions.getExtension(EXTENSION_ID)!;
@@ -86,7 +89,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		test('their settings are declared', () => {
 			const props = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes?.configuration?.properties ?? {};
-			for (const key of ['groupsFile', 'codeCommand', 'codeArgs']) {
+			for (const key of ['groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions']) {
 				assert.ok(`betterProfiles.${key}` in props, key);
 			}
 		});
@@ -216,4 +219,245 @@ suite('Extension groups against a fake CLI', () => {
 			assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), '{ broken');
 		});
 	});
+
+	// ---- prompts and cleanup -------------------------------------------------------------------------------
+
+	interface Script {
+		ask?: (message: string, buttons: string[]) => string | undefined;
+		pickMany?: (title: string, items: PickItem[]) => string[] | undefined;
+		confirm?: (message: string, detail: string, action: string) => boolean;
+	}
+
+	let api: BetterProfilesApi;
+	let restoreUi: () => void = () => { };
+	const seen = { ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[] }[], confirm: [] as { message: string; detail: string; action: string }[] };
+
+	/** Answers the extension's questions from a script; anything unscripted is declined. */
+	function answer(script: Script) {
+		seen.ask.length = seen.pickMany.length = seen.confirm.length = 0;
+		const original = { ask: api.ui.ask, pickMany: api.ui.pickMany, confirm: api.ui.confirm };
+		api.ui.ask = async (message, ...buttons) => { seen.ask.push({ message, buttons }); return script.ask?.(message, buttons); };
+		api.ui.pickMany = async (title, items) => { seen.pickMany.push({ title, items }); return script.pickMany?.(title, items); };
+		api.ui.confirm = async (message, detail, action) => { seen.confirm.push({ message, detail, action }); return script.confirm?.(message, detail, action) ?? false; };
+		restoreUi = () => Object.assign(api.ui, original);
+	}
+
+	const uninstalls = () => calls().filter(a => a.includes('--uninstall-extension'));
+
+	suite('ask to sync when the profile is out of sync', () => {
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			await api.resetPrompts();
+			await set('autoSync', 'ask');
+			writeGroups({ groups: { py: ['p.installed', 'p.new', 'p.new2'] }, profiles: { Python: ['py'] } });
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		test('asks once, naming the profile and how many are missing', async () => {
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 1);
+			assert.ok(seen.ask[0].message.includes('Python'), seen.ask[0].message);
+			assert.ok(seen.ask[0].message.includes('2'), seen.ask[0].message);
+			assert.deepStrictEqual(seen.ask[0].buttons, ['Sync', 'Not now', 'Stop asking']);
+			assert.deepStrictEqual(installs(), [], 'asking must not install anything');
+		});
+
+		test('"Sync" installs what is missing into this profile', async () => {
+			answer({ ask: () => 'Sync' });
+			await api.checkSync();
+			assert.deepStrictEqual(installs(), [
+				['--install-extension', 'p.new', '--profile', 'Python'],
+				['--install-extension', 'p.new2', '--profile', 'Python'],
+			]);
+		});
+
+		test('"Not now" is remembered for that exact set, and it asks again when the set changes', async () => {
+			answer({ ask: () => 'Not now' });
+			await api.checkSync();
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 1, 'it must not nag about the same missing extensions');
+
+			writeGroups({ groups: { py: ['p.installed', 'p.new', 'p.new2', 'p.new3'] }, profiles: { Python: ['py'] } });
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 2);
+		});
+
+		test('resetPrompts() makes a dismissed prompt appear again', async () => {
+			answer({ ask: () => 'Not now' });
+			await api.checkSync();
+			await api.resetPrompts();
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 2);
+		});
+
+		test('"Stop asking" turns autoSync off and installs nothing', async () => {
+			answer({ ask: () => 'Stop asking' });
+			await api.checkSync();
+			assert.strictEqual(config().get('autoSync'), 'off');
+			assert.deepStrictEqual(installs(), []);
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 1);
+		});
+
+		test('autoSync "auto" installs without asking', async () => {
+			await set('autoSync', 'auto');
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+			assert.deepStrictEqual(installs().map(a => a[1]), ['p.new', 'p.new2']);
+		});
+
+		test('autoSync "auto" never uninstalls, even when there are extras', async () => {
+			await set('autoSync', 'auto');
+			writeState({ Default: [], Python: ['p.installed', 'extra.a'], Agents: [] });
+			await api.checkSync();
+			assert.deepStrictEqual(uninstalls(), []);
+			assert.strictEqual(seen.pickMany.length, 0, 'no cleanup question at startup');
+		});
+
+		test('autoSync "off" does nothing and runs no CLI at all', async () => {
+			await set('autoSync', 'off');
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+			assert.deepStrictEqual(calls(), []);
+		});
+
+		test('stays quiet when the profile already has everything', async () => {
+			writeState({ Default: [], Python: ['p.installed', 'p.new', 'p.new2'], Agents: [] });
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+		});
+
+		test('stays quiet, and runs no CLI, when this profile has no groups', async () => {
+			writeGroups({ groups: { py: ['p.new'] }, profiles: { Agents: ['py'] } });
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+			assert.deepStrictEqual(calls(), []);
+		});
+
+		test('stays quiet when the profile of this window is unknown', async () => {
+			const storage = path.join(dir, 'no-association.json');
+			fs.writeFileSync(storage, JSON.stringify({ userDataProfiles: [PYTHON], profileAssociations: { workspaces: {} } }));
+			await set('storageFile', storage);
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+			assert.deepStrictEqual(calls(), []);
+		});
+
+		test('does not throw or ask when the CLI cannot be found, or the groups file is broken', async () => {
+			await set('codeCommand', undefined);
+			await set('codeArgs', undefined);
+			await api.checkSync();
+			fs.writeFileSync(groupsFile, '{ broken');
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+		});
+	});
+
+	suite('uninstalling what the groups do not mention', () => {
+		const SELF = 'lyesrabhi.better-profiles';
+
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			await api.resetPrompts();
+			// shared.x is in every profile, the way an application-scoped extension is
+			writeState({
+				Default: ['common.one', 'shared.x', 'd.only'],
+				Python: ['p.installed', 'shared.x', 'extra.a', 'extra.b', SELF],
+				Agents: ['shared.x', 'only.here'],
+			});
+			writeGroups({ groups: { py: ['p.installed'] }, profiles: { Python: ['py'] } });
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		test('lists the extras with nothing ticked beforehand, and never the shared, application-scoped or own extension', async () => {
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.strictEqual(seen.pickMany.length, 1);
+			assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['extra.a', 'extra.b']);
+			assert.ok(seen.pickMany[0].title.includes('Python'), seen.pickMany[0].title);
+			assert.ok(seen.pickMany[0].items.every(i => !('picked' in i)), 'nothing is pre-selected');
+		});
+
+		test('uninstalls only what was ticked, after a confirmation that lists it', async () => {
+			answer({ pickMany: () => ['extra.a'], confirm: () => true });
+			const report = await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+
+			assert.strictEqual(seen.confirm.length, 1);
+			assert.ok(seen.confirm[0].detail.includes('extra.a') && !seen.confirm[0].detail.includes('extra.b'), seen.confirm[0].detail);
+			assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'extra.a', '--profile', 'Python']]);
+			assert.deepStrictEqual(report.uninstalled?.map(r => [r.id, r.ok]), [['extra.a', true]]);
+			assert.ok(readState().Python.includes('extra.b'), 'what was not ticked stays');
+			assert.deepStrictEqual(readState().Default, ['common.one', 'shared.x', 'd.only'], 'other profiles are untouched');
+		});
+
+		test('declining the confirmation uninstalls nothing', async () => {
+			answer({ pickMany: () => ['extra.a', 'extra.b'], confirm: () => false });
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.deepStrictEqual(uninstalls(), []);
+		});
+
+		test('cancelling the list, or ticking nothing, uninstalls nothing and does not even ask to confirm', async () => {
+			answer({ pickMany: () => undefined });
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			answer({ pickMany: () => [] });
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.deepStrictEqual(uninstalls(), []);
+			assert.strictEqual(seen.confirm.length, 0);
+		});
+
+		test('programmatic: an explicit list is uninstalled without prompts', async () => {
+			const report = await sync({ profile: 'Python', uninstall: ['extra.b'] });
+			assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'extra.b', '--profile', 'Python']]);
+			assert.strictEqual(seen.pickMany.length + seen.confirm.length, 0);
+			assert.deepStrictEqual(report.uninstalled?.map(r => r.id), ['extra.b']);
+		});
+
+		test('programmatic: ids that are not extras are refused before anything is uninstalled', async () => {
+			for (const notExtra of ['p.installed', 'shared.x', SELF, 'not.installed']) {
+				await assert.rejects(sync({ profile: 'Python', uninstall: ['extra.a', notExtra] }), /not an extra/i, notExtra);
+			}
+			assert.deepStrictEqual(uninstalls(), []);
+		});
+
+		test('by default a programmatic sync uninstalls nothing and asks nothing', async () => {
+			await sync({ profile: 'Python' });
+			assert.deepStrictEqual(uninstalls(), []);
+			assert.strictEqual(seen.pickMany.length, 0);
+		});
+
+		test('a failed uninstall is reported and the others still run', async () => {
+			writeState({ Default: [], Python: ['p.installed', 'extra.z', 'fail.bad'], Agents: [] });
+			const report = await sync({ profile: 'Python', uninstall: ['fail.bad', 'extra.z'] });
+			const byId = Object.fromEntries((report.uninstalled ?? []).map(r => [r.id, r.ok]));
+			assert.deepStrictEqual(byId, { 'fail.bad': false, 'extra.z': true });
+			assert.ok(!readState().Python.includes('extra.z'));
+		});
+
+		test('the betterProfiles.keepExtensions setting hides extensions from the list', async () => {
+			await set('keepExtensions', ['EXTRA.A']);
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['extra.b']);
+		});
+
+		test('a profile with no groups is never offered a cleanup', async () => {
+			await sync({ profile: 'Agents', confirm: true, uninstall: 'ask' });
+			assert.strictEqual(seen.pickMany.length, 0);
+		});
+
+		test('a group that is assigned but not defined blocks cleanup', async () => {
+			writeGroups({ groups: { py: ['p.installed'] }, profiles: { Python: ['py', 'ghost'] } });
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.strictEqual(seen.pickMany.length, 0);
+		});
+
+		test('installs missing extensions first, then offers the cleanup', async () => {
+			writeGroups({ groups: { py: ['p.installed', 'p.brand-new'] }, profiles: { Python: ['py'] } });
+			answer({ pickMany: () => ['extra.a'], confirm: () => true });
+			await sync({ profile: 'Python', confirm: false, uninstall: 'ask' });
+			const order = calls().filter(a => a.includes('--install-extension') || a.includes('--uninstall-extension')).map(a => a[0]);
+			assert.deepStrictEqual(order, ['--install-extension', '--uninstall-extension']);
+		});
+	});
+
 });

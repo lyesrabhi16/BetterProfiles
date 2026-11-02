@@ -29,6 +29,16 @@ if (!(profile in state)) {
 		fs.writeFileSync(process.env.STUB_STATE, JSON.stringify(state));
 	}
 	console.log(`Installing extensions...\nExtension '${id}' v1.0.0 was successfully installed.`);
+} else if (args.includes('--uninstall-extension')) {
+	const id = flag('--uninstall-extension');
+	const at = state[profile].findIndex(existing => existing.toLowerCase() === id.toLowerCase());
+	if (id.startsWith('fail.') || at < 0) {
+		console.error(`Extension '${id}' is not installed.`);
+		process.exit(1);
+	}
+	state[profile].splice(at, 1);
+	fs.writeFileSync(process.env.STUB_STATE, JSON.stringify(state));
+	console.log(`Uninstalling ${id}...\nExtension '${id}' was successfully uninstalled!`);
 } else {
 	process.exit(2);
 }
