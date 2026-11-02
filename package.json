@@ -25,6 +25,31 @@
         "command": "better-profiles.switchProfile",
         "title": "Switch Profile",
         "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.compareProfiles",
+        "title": "Compare Extensions Across Profiles",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.addToGroup",
+        "title": "Add Extensions To Group…",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.assignGroup",
+        "title": "Give A Group To A Profile…",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.syncProfile",
+        "title": "Sync Profile With Its Groups…",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.editGroups",
+        "title": "Edit Groups File",
+        "category": "Better Profiles"
       }
     ],
     "configuration": {
@@ -35,6 +60,25 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "Advanced. Path to VS Code's `storage.json`, where profiles and their workspace associations are recorded. Leave empty to use the one next to this extension's global storage."
+        },
+        "betterProfiles.groupsFile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Where your extension groups are kept. Leave empty to use `groups.json` in this extension's global storage, which every profile shares. Point it into a dotfiles repository to version it."
+        },
+        "betterProfiles.codeCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Advanced. An executable to run instead of this VS Code's own command line (for example a custom build). Used to list and install extensions per profile. Leave empty to use the built-in one."
+        },
+        "betterProfiles.codeArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "Advanced. Arguments that always come first when `#betterProfiles.codeCommand#` runs, for example `--user-data-dir` and `--extensions-dir` for a portable or non-default installation."
         }
       }
     }

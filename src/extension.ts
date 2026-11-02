@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { BetterProfilesApi } from './api';
+import { registerGroupCommands } from './groupCommands';
 import {
 	Detection,
 	Profile,
@@ -81,6 +82,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		// A profile can be renamed or re-iconed from another window.
 		vscode.window.onDidChangeWindowState(state => state.focused && void refresh()),
 		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),
+		...registerGroupCommands({ context, log, api }),
 	);
 
 	await refresh();

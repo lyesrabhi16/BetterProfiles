@@ -16,6 +16,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Extension groups: `Add Extensions To Group…`, `Give A Group To A Profile…`, `Compare Extensions Across Profiles`,
+  `Sync Profile With Its Groups…` and `Edit Groups File`, plus the `betterProfiles.groupsFile`,
+  `betterProfiles.codeCommand` and `betterProfiles.codeArgs` settings. Sync only installs, never removes.
 - `Better Profiles: Switch Profile` command (the status bar item runs it).
 - `activate()` returns a small API; `betterProfiles.storageFile` setting.
 - A README, unit tests for the detection logic, and Extension Host tests that run against a real VS Code.

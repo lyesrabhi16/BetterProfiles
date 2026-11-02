@@ -133,7 +133,7 @@ suite('Extension groups against a fake CLI', () => {
 		test('lists the extensions of Default and every profile, asking the CLI once per profile', async () => {
 			writeState({ Default: ['a.one', 'b.two'], Python: ['a.one', 'p.py'], Agents: [] });
 			const md = await exec<string>('better-profiles.compareProfiles', { open: false });
-			assert.ok(md.split('\n')[0].startsWith('| Extension | Default | Python | Agents |'), md);
+			assert.ok(md.split('\n').includes('| Extension | Default | Python | Agents |'), md);
 			assert.ok(/\| a\.one \| ✓ \| ✓ \|/.test(md), md);
 			assert.ok(/\| b\.two \| ✓ \|\s*\|\s*\|/.test(md), md);
 			assert.ok(/\| p\.py \|\s*\| ✓ \|/.test(md), md);

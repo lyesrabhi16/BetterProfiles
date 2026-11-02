@@ -5,6 +5,7 @@ import {
 	RunResult,
 	Runner,
 	installArgs,
+	isInstalledExtensionPath,
 	installExtension,
 	listArgs,
 	listExtensions,
@@ -157,5 +158,32 @@ suite('installExtension', () => {
 			assert.strictEqual(r.ok, false, bad);
 		}
 		assert.deepStrictEqual(calls, []);
+	});
+});
+
+suite('isInstalledExtensionPath', () => {
+	test('an installed extension lives in a folder named <id>-<version>', () => {
+		assert.ok(isInstalledExtensionPath('ms-python.python', '/h/.vscode/extensions/ms-python.python-2024.1.0'));
+	});
+
+	test('a platform suffix is fine', () => {
+		assert.ok(isInstalledExtensionPath('ms-python.debugpy', '/h/.vscode/extensions/ms-python.debugpy-2026.7.1-linux-x64'));
+	});
+
+	test('the id is compared case-insensitively (folders are lower-case)', () => {
+		assert.ok(isInstalledExtensionPath('GitHub.copilot', '/h/.vscode/extensions/github.copilot-1.2.3'));
+	});
+
+	test('a development checkout is not an installed extension', () => {
+		assert.ok(!isInstalledExtensionPath('lyesrabhi.better-profiles', '/home/u/Projects/BetterProfiles'));
+	});
+
+	test('an extension built into VS Code is not one either', () => {
+		assert.ok(!isInstalledExtensionPath('vscode.git', '/opt/vscode/resources/app/extensions/git'));
+	});
+
+	test('a folder that merely starts with the id is not enough: a version must follow', () => {
+		assert.ok(!isInstalledExtensionPath('a.b', '/ex/a.b-c.d-1.0.0'));
+		assert.ok(!isInstalledExtensionPath('a.b', '/ex/a.b'));
 	});
 });

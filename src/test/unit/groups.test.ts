@@ -23,7 +23,7 @@ suite('isExtensionId', () => {
 	});
 
 	test('rejects flags, paths, urls, spaces and ids without a publisher', () => {
-		for (const id of ['', 'python', '--uninstall-extension', '-x.y', '../x.vsix', '/tmp/a.vsix', 'a.b c', 'a/b.c', 'https://x.y/z', 'a.', '.b', 'a..b', 'a.b;rm']) {
+		for (const id of ['', 'python', '--uninstall-extension', '-x.y', '../x.vsix', '/tmp/a.vsix', 'a.b c', 'a/b.c', 'https://x.y/z', 'a.', '.b', 'a..b', 'a.b;rm', 'evil.vsix', 'X.VSIX', 'pub.name.vsix']) {
 			assert.ok(!isExtensionId(id), JSON.stringify(id));
 		}
 	});
@@ -83,7 +83,7 @@ suite('serializeGroups', () => {
 	test('is readable: indented, one extension per line, newline at the end', () => {
 		const text = serializeGroups(config({ web: ['a.b', 'c.d'] }));
 		assert.ok(text.endsWith('\n'));
-		assert.ok(text.includes('\n    "a.b",\n'), text);
+		assert.ok(text.includes('\n      "a.b",\n'), text);
 	});
 });
 
@@ -176,7 +176,7 @@ suite('renderMatrix', () => {
 		const lines = md.trim().split('\n');
 		assert.strictEqual(lines[0], '| Extension | Default | Python |');
 		assert.ok(/^\|\s*-+\s*\|/.test(lines[1]), lines[1]);
-		assert.deepStrictEqual(lines.slice(2).map(l => l.split('|').slice(1, -1).map(s => s.trim())), [
+		assert.deepStrictEqual(lines.slice(2, -1).map(l => l.split('|').slice(1, -1).map(s => s.trim())), [
 			['a.one', '✓', '✓'],
 			['b.two', '✓', ''],
 			['c.three', '', '✓'],
@@ -185,7 +185,7 @@ suite('renderMatrix', () => {
 
 	test('merges ids that differ only in case', () => {
 		const md = renderMatrix([{ profile: 'A', ids: ['X.Y'] }, { profile: 'B', ids: ['x.y'] }]);
-		assert.strictEqual(md.trim().split('\n').length, 3);
+		assert.strictEqual(md.trim().split('\n').length, 4, 'header, separator, one merged row, total');
 	});
 
 	test('says how many extensions each profile has', () => {
