@@ -1,0 +1,161 @@
+import * as assert from 'assert';
+import {
+	CliError,
+	CliInvocation,
+	RunResult,
+	Runner,
+	installArgs,
+	installExtension,
+	listArgs,
+	listExtensions,
+	parseExtensionList,
+	pickExtensionsDir,
+	resolveCli,
+	userDataDirFromGlobalStorage,
+} from '../../cli';
+
+const cli: CliInvocation = { command: '/bin/vscode', args: ['/app/out/cli.js', '--user-data-dir', '/ud', '--extensions-dir', '/ex'], env: { ELECTRON_RUN_AS_NODE: '1' } };
+
+/** A fake runner that records what it was asked to run. */
+function fakeRunner(result: Partial<RunResult> | ((args: string[]) => Partial<RunResult>)) {
+	const calls: { command: string; args: string[]; env: Record<string, string> }[] = [];
+	const run: Runner = async (command, args, env) => {
+		calls.push({ command, args, env });
+		const r = typeof result === 'function' ? result(args) : result;
+		return { code: 0, stdout: '', stderr: '', ...r };
+	};
+	return { run, calls };
+}
+
+suite('resolveCli', () => {
+	const base = { execPath: '/bin/vscode', appRoot: '/opt/vscode/resources/app', userDataDir: '/home/u/.config/Code', extensionsDir: '/home/u/.vscode/extensions' };
+
+	test('by default runs the editor binary on its own cli.js, as the "code" launcher does, with this instance\'s directories', () => {
+		const r = resolveCli(base);
+		assert.deepStrictEqual(r, {
+			command: '/bin/vscode',
+			args: ['/opt/vscode/resources/app/out/cli.js', '--user-data-dir', '/home/u/.config/Code', '--extensions-dir', '/home/u/.vscode/extensions'],
+			env: { ELECTRON_RUN_AS_NODE: '1' },
+		});
+	});
+
+	test('refuses to guess when the extensions folder is unknown (it could hit the wrong installation)', () => {
+		const r = resolveCli({ ...base, extensionsDir: undefined });
+		assert.ok('error' in r);
+		assert.ok(/extensions/i.test(r.error), r.error);
+	});
+
+	test('a configured command is used as is, with the configured arguments and nothing derived', () => {
+		const r = resolveCli({ ...base, command: '/usr/bin/code-insiders', args: ['--user-data-dir', '/custom'], extensionsDir: undefined });
+		assert.deepStrictEqual(r, { command: '/usr/bin/code-insiders', args: ['--user-data-dir', '/custom'], env: {} });
+	});
+
+	test('a blank configured command counts as not configured', () => {
+		const r = resolveCli({ ...base, command: '   ' });
+		assert.ok(!('error' in r) && r.command === '/bin/vscode');
+	});
+});
+
+suite('userDataDirFromGlobalStorage', () => {
+	test('goes up from <user-data-dir>/User/globalStorage/<extension>', () => {
+		assert.strictEqual(userDataDirFromGlobalStorage('/home/u/.config/Code/User/globalStorage/lyesrabhi.better-profiles'), '/home/u/.config/Code');
+	});
+
+	test('works for a custom user-data-dir', () => {
+		assert.strictEqual(userDataDirFromGlobalStorage('/tmp/x/user-data/User/globalStorage/pub.ext'), '/tmp/x/user-data');
+	});
+});
+
+suite('pickExtensionsDir', () => {
+	test('is the folder most installed extensions share', () => {
+		assert.strictEqual(
+			pickExtensionsDir(['/h/.vscode/extensions/a.b-1.0.0', '/h/.vscode/extensions/c.d-2.0.0', '/elsewhere/x.y-1.0.0']),
+			'/h/.vscode/extensions',
+		);
+	});
+
+	test('is undefined when there are no extensions to go on', () => {
+		assert.strictEqual(pickExtensionsDir([]), undefined);
+	});
+
+	test('on a tie the first folder seen wins', () => {
+		assert.strictEqual(pickExtensionsDir(['/one/a.b-1', '/two/c.d-1']), '/one');
+	});
+});
+
+suite('parseExtensionList', () => {
+	test('reads "id@version" lines', () => {
+		assert.deepStrictEqual(parseExtensionList('ms-python.python@2024.1.0\naaron-bond.better-comments@3.1.1\n'), [
+			{ id: 'ms-python.python', version: '2024.1.0' },
+			{ id: 'aaron-bond.better-comments', version: '3.1.1' },
+		]);
+	});
+
+	test('reads plain ids when versions were not requested', () => {
+		assert.deepStrictEqual(parseExtensionList('a.b\nc.d\n'), [{ id: 'a.b' }, { id: 'c.d' }]);
+	});
+
+	test('keeps platform-specific version suffixes', () => {
+		assert.deepStrictEqual(parseExtensionList('ms-python.debugpy@2026.7.1@linux-x64\n')[0], { id: 'ms-python.debugpy', version: '2026.7.1@linux-x64' });
+	});
+
+	test('ignores blank lines, CRLF and anything that is not an extension id', () => {
+		const out = 'Extensions installed on this machine:\r\na.b@1.0.0\r\n\r\n(node:12) Warning: something\r\nc.d@2.0.0\r\n';
+		assert.deepStrictEqual(parseExtensionList(out).map(e => e.id), ['a.b', 'c.d']);
+	});
+});
+
+suite('listArgs / installArgs', () => {
+	test('list asks for versions and omits --profile for the Default profile', () => {
+		assert.deepStrictEqual(listArgs(), ['--list-extensions', '--show-versions']);
+		assert.deepStrictEqual(listArgs('Default'), ['--list-extensions', '--show-versions']);
+	});
+
+	test('a named profile is one separate argument, even with spaces', () => {
+		assert.deepStrictEqual(listArgs('My Python'), ['--list-extensions', '--show-versions', '--profile', 'My Python']);
+		assert.deepStrictEqual(installArgs('a.b', 'My Python'), ['--install-extension', 'a.b', '--profile', 'My Python']);
+	});
+
+	test('install into Default has no --profile', () => {
+		assert.deepStrictEqual(installArgs('a.b'), ['--install-extension', 'a.b']);
+	});
+});
+
+suite('listExtensions', () => {
+	test('runs the CLI with its fixed arguments first and parses the output', async () => {
+		const { run, calls } = fakeRunner({ stdout: 'a.b@1.0.0\nc.d@2.0.0\n' });
+		const list = await listExtensions(cli, run, 'Python');
+		assert.deepStrictEqual(list.map(e => e.id), ['a.b', 'c.d']);
+		assert.deepStrictEqual(calls, [{ command: '/bin/vscode', args: [...cli.args, '--list-extensions', '--show-versions', '--profile', 'Python'], env: cli.env }]);
+	});
+
+	test('throws a CliError with the CLI message when it fails', async () => {
+		const { run } = fakeRunner({ code: 1, stderr: "Profile 'Nope' not found.\n" });
+		await assert.rejects(listExtensions(cli, run, 'Nope'), (e: unknown) => e instanceof CliError && /Profile 'Nope' not found/.test(e.message) && e.code === 1);
+	});
+});
+
+suite('installExtension', () => {
+	test('installs one extension into the profile and reports success', async () => {
+		const { run, calls } = fakeRunner({ stdout: "Installing extensions...\nExtension 'a.b' v1.0.0 was successfully installed.\n" });
+		const r = await installExtension(cli, run, 'a.b', 'Python');
+		assert.strictEqual(r.ok, true);
+		assert.deepStrictEqual(calls[0].args, [...cli.args, '--install-extension', 'a.b', '--profile', 'Python']);
+	});
+
+	test('reports a failure without throwing, so one bad extension does not stop a sync', async () => {
+		const { run } = fakeRunner({ code: 1, stderr: "Extension 'x.y' not found.\n" });
+		const r = await installExtension(cli, run, 'x.y');
+		assert.strictEqual(r.ok, false);
+		assert.ok(r.message.includes("'x.y' not found"), r.message);
+	});
+
+	test('never passes anything that is not a plain extension id to the CLI', async () => {
+		const { run, calls } = fakeRunner({});
+		for (const bad of ['--uninstall-extension', '-x.y', '../evil.vsix', '/tmp/a.vsix', 'python']) {
+			const r = await installExtension(cli, run, bad, 'Python');
+			assert.strictEqual(r.ok, false, bad);
+		}
+		assert.deepStrictEqual(calls, []);
+	});
+});
