@@ -21,6 +21,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- The notifications after adding an extension to a group, or giving a group to a profile, now have a button for the next
+  step (`Sync Profile…`, or `Give Group To A Profile…` when no profile follows the group) instead of telling you which command
+  to run.
 - Three entries in the Extensions view gear menu (the `extension/context` menu, next to "Apply Extension to all Profiles"):
   `Add to Better Profiles Group…`, `Remove from Better Profiles Group…` and `Install in Other Profiles…`. Removing from a
   group never uninstalls anything, and installing only offers profiles that lack the extension.

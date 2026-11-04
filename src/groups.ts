@@ -320,6 +320,6 @@ export function removeFromGroup(config: GroupsConfig, group: string, id: string)
 }
 
 /** The profiles (and "*" for every profile) that follow a group, in the order of the file. */
-export function profilesFollowing(_config: GroupsConfig, _group: string): string[] {
-	throw new Error('not implemented');
+export function profilesFollowing(config: GroupsConfig, group: string): string[] {
+	return Object.keys(config.profiles).filter(profile => config.profiles[profile].includes(group));
 }

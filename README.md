@@ -104,7 +104,7 @@ they are not in the Command Palette because they need an extension to act on.
 
 | Entry | What it does |
 |---|---|
-| **Add to Better Profiles Group…** | Pick a group, or type a name to start one, and the extension is added to it. |
+| **Add to Better Profiles Group…** | Pick a group, or type a name to start one, and the extension is added to it. The notification that follows has a button for the next step: **Sync Profile…**, or **Give Group To A Profile…** if no profile follows the group yet. |
 | **Remove from Better Profiles Group…** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. |
 | **Install in Other Profiles…** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
 

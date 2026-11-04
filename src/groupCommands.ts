@@ -31,6 +31,7 @@ import {
 	planCleanup,
 	planSync,
 	promptKey,
+	profilesFollowing,
 	removeFromGroup,
 	renderMatrix,
 	serializeGroups,
@@ -148,6 +149,22 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return ui.pickOne(title, items, options.allowNew ? { newItem: { label: '$(add) New group…', prompt: 'Name of the new group' } } : undefined);
 	}
 
+	const SYNC_BUTTON = 'Sync Profile…';
+	const GIVE_BUTTON = 'Give Group To A Profile…';
+
+	/** A notification whose buttons start the next step. The command never waits for the answer: the user may leave it open. */
+	function offer(message: string, actions: Record<string, () => Thenable<unknown>>): void {
+		void ui.ask(message, ...Object.keys(actions))
+			.then(choice => (choice !== undefined && Object.prototype.hasOwnProperty.call(actions, choice) ? actions[choice]() : undefined))
+			.then(undefined, error => log.warn(`Follow-up from a notification failed: ${error instanceof Error ? error.message : String(error)}`));
+	}
+
+	/** After a group changed: sync if some profile follows it; if none does, syncing would do nothing, so offer to give it to one. */
+	const nextStepFor = (config: GroupsConfig, group: string): Record<string, () => Thenable<unknown>> =>
+		profilesFollowing(config, group).length > 0
+			? { [SYNC_BUTTON]: () => vscode.commands.executeCommand('better-profiles.syncProfile') }
+			: { [GIVE_BUTTON]: () => vscode.commands.executeCommand('better-profiles.assignGroup', { group }) };
+
 	const withProgress = <T>(title: string, task: () => Promise<T>) =>
 		vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task);
 
@@ -186,7 +203,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		const next = addToGroup(config, group, extensions);
 		await saveGroups(file, next);
-		void vscode.window.showInformationMessage(`Group "${group.trim()}" now has ${next.groups[group.trim()].length} extensions.`);
+		offer(`Group "${group.trim()}" now has ${next.groups[group.trim()].length} extensions.`, nextStepFor(next, group.trim()));
 		return next;
 	};
 
@@ -202,7 +219,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		const next = assignGroup(config, profile, group);
 		await saveGroups(file, next);
-		void vscode.window.showInformationMessage(`"${profile === ALL_PROFILES ? 'All profiles' : profile}" now gets the group "${group}". Run "Sync Profile With Its Groups" to install it.`);
+		offer(`"${profile === ALL_PROFILES ? 'All profiles' : profile}" now gets the group "${group}".`, { [SYNC_BUTTON]: () => vscode.commands.executeCommand('better-profiles.syncProfile') });
 		return next;
 	};
 
@@ -232,7 +249,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		const next = addToGroup(config, group, [id]);
 		await saveGroups(file, next);
-		void vscode.window.showInformationMessage(`Added ${id} to "${group.trim()}". Run "Sync Profile With Its Groups" to install the group where it is missing.`);
+		offer(`Added ${id} to "${group.trim()}".`, nextStepFor(next, group.trim()));
 		return next;
 	};
 
