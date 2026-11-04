@@ -323,3 +323,8 @@ export function removeFromGroup(config: GroupsConfig, group: string, id: string)
 export function profilesFollowing(config: GroupsConfig, group: string): string[] {
 	return Object.keys(config.profiles).filter(profile => config.profiles[profile].includes(group));
 }
+
+/** Every extension that is in some group, lower-case and once: the form VS Code's menus use for an extension's id. */
+export function groupedExtensionIds(_config: GroupsConfig): string[] {
+	throw new Error('not implemented');
+}

@@ -4,6 +4,7 @@ import {
 	GroupsConfig,
 	addToGroup,
 	assignedGroups,
+	groupedExtensionIds,
 	groupsContaining,
 	profilesFollowing,
 	removeFromGroup,
@@ -505,5 +506,16 @@ suite('profilesFollowing', () => {
 	test('a group nobody follows gives an empty list', () => {
 		assert.deepStrictEqual(profilesFollowing(c, 'unused'), []);
 		assert.deepStrictEqual(profilesFollowing(c, 'nope'), []);
+	});
+});
+
+suite('groupedExtensionIds', () => {
+	test('is every extension of every group, lower-case and once', () => {
+		const c: GroupsConfig = { groups: { web: ['A.One', 'b.two'], tools: ['a.one', 'C.Three'], empty: [] }, profiles: {} };
+		assert.deepStrictEqual(groupedExtensionIds(c).sort(), ['a.one', 'b.two', 'c.three']);
+	});
+
+	test('no groups, no extensions', () => {
+		assert.deepStrictEqual(groupedExtensionIds({ groups: {}, profiles: {} }), []);
 	});
 });

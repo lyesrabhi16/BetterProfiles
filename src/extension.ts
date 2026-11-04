@@ -66,6 +66,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		refresh,
 		checkSync: () => groups.checkSync(),
 		resetPrompts: () => groups.resetPrompts(),
+		groupedExtensions: () => { throw new Error('not implemented'); },
 		ui,
 		statusBarItem,
 	};

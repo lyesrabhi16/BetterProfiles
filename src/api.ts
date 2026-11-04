@@ -39,6 +39,8 @@ export interface BetterProfilesApi {
 	checkSync(): Promise<void>;
 	/** Forget "Not now" answers, so the sync prompt can appear again. */
 	resetPrompts(): Promise<void>;
+	/** The ids (lower-case) of the extensions that are in some group: the list the Extensions view's menu uses. */
+	groupedExtensions(): readonly string[];
 	readonly ui: PromptUi;
 	readonly statusBarItem: vscode.StatusBarItem;
 }

@@ -870,4 +870,66 @@ suite('Extension groups against a fake CLI', () => {
 		});
 	});
 
+
+	suite('showing which extensions are in a group', () => {
+		const ADD = 'better-profiles.extensionAddToGroup';
+		const REMOVE = 'better-profiles.extensionRemoveFromGroup';
+		const until = async (condition: () => boolean, ms = 3000) => {
+			const end = Date.now() + ms;
+			while (!condition() && Date.now() < end) {
+				await new Promise(resolve => setTimeout(resolve, 25));
+			}
+			return condition();
+		};
+
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		test('only the "Remove from group" entry depends on the extension being in a group', () => {
+			const entries: { command: string; when: string }[] = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes.menus['extension/context'];
+			const whenOf = (command: string) => entries.find(e => e.command === command)!.when;
+			assert.ok(whenOf(REMOVE).includes('extension in betterProfiles.groupedExtensions'), whenOf(REMOVE));
+			assert.ok(!whenOf(ADD).includes('betterProfiles.groupedExtensions'), whenOf(ADD));
+			assert.ok(!whenOf('better-profiles.extensionInstallInProfiles').includes('betterProfiles.groupedExtensions'));
+		});
+
+		test('the list holds every extension of every group, lower-case and once', async () => {
+			writeGroups({ groups: { web: ['A.One', 'b.two'], tools: ['a.one', 'C.Three'] } });
+			await set('groupsFile', groupsFile); // changing the setting makes it read the file again
+			assert.ok(await until(() => api.groupedExtensions().length === 3), api.groupedExtensions().join(','));
+			assert.deepStrictEqual([...api.groupedExtensions()].sort(), ['a.one', 'b.two', 'c.three']);
+		});
+
+		test('it follows what the commands change', async () => {
+			writeGroups({ groups: { web: ['a.b'] } });
+			await set('groupsFile', groupsFile);
+			assert.ok(await until(() => api.groupedExtensions().includes('a.b')));
+			await exec(ADD, { id: 'X.New', group: 'web' });
+			assert.ok(api.groupedExtensions().includes('x.new'), 'added');
+			await exec(REMOVE, { id: 'X.New', groups: ['web'] });
+			assert.ok(!api.groupedExtensions().includes('x.new'), 'removed');
+			assert.ok(api.groupedExtensions().includes('a.b'), 'the others stay');
+		});
+
+		test('a missing or broken groups file gives an empty list and no error', async () => {
+			fs.writeFileSync(groupsFile, '{ broken');
+			await set('groupsFile', groupsFile);
+			assert.ok(await until(() => api.groupedExtensions().length === 0));
+			await set('groupsFile', path.join(dir, 'does-not-exist.json'));
+			assert.ok(await until(() => api.groupedExtensions().length === 0));
+		});
+
+		test('the "Add to group" picker marks the groups that already hold the extension', async () => {
+			writeGroups({ groups: { web: ['x.new', 'a.b'], tools: ['c.d'] } });
+			answer({ pickOne: () => undefined });
+			await exec(ADD, 'X.New', { id: 'X.New' });
+			const items = seen.pickOne[0].items;
+			assert.ok(/already/i.test(items.find(i => i.id === 'web')!.description ?? ''), JSON.stringify(items));
+			assert.ok(!/already/i.test(items.find(i => i.id === 'tools')!.description ?? ''), JSON.stringify(items));
+		});
+	});
+
 });
