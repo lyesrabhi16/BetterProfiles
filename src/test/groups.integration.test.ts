@@ -1649,6 +1649,231 @@ suite('Extension groups against a fake CLI', () => {
 			}
 		});
 
+		suite('several items at once', () => {
+			// VS Code runs a command of a tree item with the clicked item and, when that one is part of a selection of several,
+			// the whole selection as a second argument.
+			type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
+			const run = <T = unknown>(command: string, clicked: Node, selection?: Node[]) => exec<T>(`better-profiles.view.${command}`, clicked, selection);
+			const untilAsync = async (condition: () => Promise<boolean>, ms = 1500) => {
+				const end = Date.now() + ms;
+				while (Date.now() < end) {
+					if (await condition()) {
+						return true;
+					}
+					await new Promise(resolve => setTimeout(resolve, 20));
+				}
+				return false;
+			};
+			teardown(() => { delete process.env.STUB_ACTION_DELAY_MS; });
+
+			suite('which items a command acts on', () => {
+				const trio = (): Node[] => [groupExt('web', 'a.b'), groupExt('web', 'c.d'), groupExt('tools', 'x.y')];
+				setup(() => writeGroups({ groups: { web: ['a.b', 'c.d'], tools: ['x.y', 'e.f'] }, profiles: {} }));
+
+				test('the whole selection when the clicked item is part of it', async () => {
+					await run('removeFromGroup', trio()[0], trio());
+					assert.deepStrictEqual(readGroups().groups, { web: [], tools: ['e.f'] });
+				});
+
+				test('only the clicked item when there is no selection', async () => {
+					await run('removeFromGroup', groupExt('web', 'a.b'));
+					assert.deepStrictEqual(readGroups().groups, { web: ['c.d'], tools: ['x.y', 'e.f'] });
+				});
+
+				test('only the clicked item when it is not in the selection', async () => {
+					await run('removeFromGroup', groupExt('web', 'a.b'), [groupExt('web', 'c.d'), groupExt('tools', 'x.y')]);
+					assert.deepStrictEqual(readGroups().groups, { web: ['c.d'], tools: ['x.y', 'e.f'] });
+				});
+
+				test('what is not of the right kind is left out of the selection', async () => {
+					await run('removeFromGroup', groupExt('web', 'a.b'), [groupExt('web', 'a.b'), group('web'), profile('Python'), profileExt('Python', 'p.installed'), { kind: 'message', text: 'x' }]);
+					assert.deepStrictEqual(readGroups().groups, { web: ['c.d'], tools: ['x.y', 'e.f'] });
+					assert.deepStrictEqual(calls(), []);
+				});
+
+				test('the same item twice counts once', async () => {
+					await run('removeFromGroup', groupExt('web', 'a.b'), [groupExt('web', 'a.b'), groupExt('web', 'a.b'), groupExt('web', 'c.d')]);
+					assert.deepStrictEqual(readGroups().groups.web, []);
+				});
+			});
+
+			suite('adding', () => {
+				const some = (): Node[] => [profileExt('Python', 'p.installed'), profileGroupExt('Python', 'web', 'a.b'), profileExt('Python', 'shared.x')];
+
+				test('Add to Group asks once for all of them and adds them all', async () => {
+					answer({ pickMany: () => ['tools'] });
+					await run('addExtensionToGroup', some()[0], some());
+					assert.strictEqual(seen.pickMany.length, 1);
+					assert.ok(seen.pickMany[0].title.includes('3 extensions'), seen.pickMany[0].title);
+					assert.deepStrictEqual(readGroups().groups.tools, ['x.y', 'p.installed', 'a.b', 'shared.x']);
+				});
+
+				test('Add to Group says which groups already have all, or some, of them', async () => {
+					answer({ pickMany: () => [] });
+					await run('addExtensionToGroup', some()[0], some());
+					const web = seen.pickMany[0].items.find(i => i.id === 'web');
+					assert.ok(/1 of 3/.test(String(web?.description)), String(web?.description));
+				});
+
+				test('Add to Group can make a new group for all of them', async () => {
+					answer({ pickMany: () => ['fresh'] });
+					await run('addExtensionToGroup', some()[0], some());
+					assert.deepStrictEqual(readGroups().groups.fresh, ['p.installed', 'a.b', 'shared.x']);
+				});
+
+				test('Add to Group on one item still asks about that one', async () => {
+					answer({ pickMany: () => ['tools'] });
+					await run('addExtensionToGroup', some()[0]);
+					assert.ok(seen.pickMany[0].title.includes('p.installed'), seen.pickMany[0].title);
+				});
+
+				test('Install in Other Profiles asks once and installs into each profile only what it lacks', async () => {
+					answer({ pickMany: () => ['Default', 'Agents'] });
+					await run('installExtensionInProfiles', some()[0], [some()[0], some()[2]]);
+					assert.strictEqual(seen.pickMany.length, 1);
+					assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['Default', 'Agents'], 'Python has both, so it is not offered');
+					assert.deepStrictEqual(installs().sort(), [
+						['--install-extension', 'p.installed', '--profile', 'Agents'],
+						['--install-extension', 'p.installed', '--profile', 'Default'],
+						['--install-extension', 'shared.x', '--profile', 'Default'],
+					].sort());
+				});
+
+				test('Install in Other Profiles with every extension already everywhere says so', async () => {
+					answer({});
+					writeState({ Default: ['p.installed'], Python: ['p.installed'], Agents: ['p.installed'] });
+					await run('installExtensionInProfiles', profileExt('Python', 'p.installed'), [profileExt('Python', 'p.installed'), profileExt('Python', 'p.installed')]);
+					assert.strictEqual(seen.pickMany.length, 0);
+					assert.deepStrictEqual(installs(), []);
+				});
+
+				test('Give To A Profile gives all the selected groups after asking for the profile once', async () => {
+					answer({ pickOne: (_title, items) => items.find(i => i.id === 'Agents')?.id });
+					await run('assignGroup', group('web'), [group('web'), group('tools'), group('empty')]);
+					assert.strictEqual(seen.pickOne.length, 1);
+					assert.deepStrictEqual(readGroups().profiles.Agents, ['web', 'tools', 'empty']);
+				});
+
+				test('Copy Extension Id puts every id on the clipboard, one per line', async () => {
+					await run('copyExtensionId', some()[0], some());
+					assert.strictEqual(await vscode.env.clipboard.readText(), 'p.installed\na.b\nshared.x');
+				});
+			});
+
+			suite('removing extensions from a profile', () => {
+				const three = (): Node[] => [profileGroupExt('Python', 'web', 'a.b'), profileGroupExt('Python', 'web', 'c.d'), profileExt('Python', 'p.installed')];
+				setup(() => writeState({ Default: ['common.one'], Python: ['a.b', 'c.d', 'p.installed', 'shared.x'], Agents: ['shared.x'] }));
+
+				test('one question for all of them, one run of the command line, and the profile is told not to want those a group has', async () => {
+					answer({ confirm: () => true });
+					const report = await run<Report>('removeExtensionFromProfile', three()[0], three());
+					assert.strictEqual(seen.confirm.length, 1);
+					assert.ok(['a.b', 'c.d', 'p.installed'].every(id => seen.confirm[0].detail.includes(id) || seen.confirm[0].message.includes(id)), seen.confirm[0].message + seen.confirm[0].detail);
+					assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'a.b', '--uninstall-extension', 'c.d', '--uninstall-extension', 'p.installed', '--profile', 'Python']]);
+					assert.deepStrictEqual(report.uninstalled.sort(), ['a.b', 'c.d', 'p.installed']);
+					assert.deepStrictEqual(readGroups().excludes, { Python: ['a.b', 'c.d'] }, 'p.installed is in no group, so nothing to record for it');
+					assert.deepStrictEqual(readState().Python, ['shared.x']);
+					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d'], 'the group itself is untouched');
+				});
+
+				test('declined: nothing is changed', async () => {
+					answer({ confirm: () => false });
+					const report = await run<Report>('removeExtensionFromProfile', three()[0], three());
+					assert.strictEqual(report.cancelled, true);
+					assert.deepStrictEqual(uninstalls(), []);
+					assert.strictEqual(readGroups().excludes, undefined);
+				});
+
+				test('what must stay installed stays, and the rest goes', async () => {
+					await set('keepExtensions', ['c.d']);
+					answer({ confirm: () => true });
+					const report = await run<Report>('removeExtensionFromProfile', three()[0], three());
+					assert.deepStrictEqual(report.uninstalled.sort(), ['a.b', 'p.installed']);
+					assert.deepStrictEqual(report.kept, ['c.d']);
+					assert.deepStrictEqual(readGroups().excludes, { Python: ['a.b'] });
+				});
+
+				test('extensions of several profiles are each removed from their own profile, asking once per profile', async () => {
+					answer({ confirm: () => true });
+					await run('removeExtensionFromProfile', profileExt('Python', 'p.installed'), [profileExt('Python', 'p.installed'), profileExt('Agents', 'shared.x')]);
+					assert.strictEqual(seen.confirm.length, 2);
+					assert.ok(!readState().Python.includes('p.installed'));
+					assert.deepStrictEqual(readState().Agents, []);
+					assert.ok(readState().Python.includes('shared.x'), 'the same extension in another profile is not touched');
+				});
+
+				test('all of them leave the tree at once', async () => {
+					process.env.STUB_ACTION_DELAY_MS = '1500';
+					answer({ confirm: () => true });
+					const running = run('removeExtensionFromProfile', three()[0], three());
+					assert.ok(await untilAsync(async () => {
+						const kids = await children('profiles', profileGroup('Python', 'web'));
+						const top = await children('profiles', profile('Python'));
+						return kids.length === 0 && !top.some(n => n.id === 'p.installed');
+					}, 900), 'all three gone within a second');
+					assert.ok(readState().Python.includes('a.b'), 'the command line has not finished yet');
+					await running;
+				});
+
+				test('the extensions of the Groups tree are refused: they belong to the real group', async () => {
+					answer({ confirm: () => true });
+					await assert.rejects(run('removeExtensionFromProfile', groupExt('web', 'a.b'), [groupExt('web', 'a.b'), groupExt('web', 'c.d')]), /item of the Better Profiles tab/);
+					assert.deepStrictEqual(uninstalls(), []);
+				});
+			});
+
+			suite('removing groups', () => {
+				test('Remove From Profile on several groups of a profile asks once, and keeps what another group still wants', async () => {
+					writeGroups({ groups: { web: ['a.b'], dev: ['c.d'], keep: ['c.d'] }, profiles: { Python: ['web', 'dev', 'keep'] } });
+					writeState({ Default: [], Python: ['a.b', 'c.d'], Agents: [] });
+					answer({ confirm: () => true });
+					const report = await run<Report>('removeFromProfile', profileGroup('Python', 'web'), [profileGroup('Python', 'web'), profileGroup('Python', 'dev')]);
+					assert.strictEqual(seen.confirm.length, 1);
+					assert.deepStrictEqual(report.uninstalled, ['a.b']);
+					assert.deepStrictEqual(readGroups().profiles, { Python: ['keep'] });
+					assert.deepStrictEqual(readState().Python, ['c.d']);
+				});
+
+				test('groups that go to all profiles are asked about once, apart from the others', async () => {
+					writeGroups({ groups: { web: ['a.b'], tools: ['x.y'], more: ['m.n'] }, profiles: { '*': ['tools', 'more'], Python: ['web'] } });
+					answer({ ask: (_message, buttons) => buttons[0], confirm: () => true });
+					await run('removeFromProfile', profileGroup('Python', 'web'), [profileGroup('Python', 'web'), profileGroup('Python', 'tools'), profileGroup('Python', 'more')]);
+					assert.strictEqual(seen.ask.length, 1);
+					assert.ok(/2 groups/.test(seen.ask[0].message), seen.ask[0].message);
+					assert.deepStrictEqual(readGroups().profiles, {}, 'web left Python and both went from all profiles');
+				});
+
+				test('declining the offer for all profiles still removes the groups of the profile itself', async () => {
+					writeGroups({ groups: { web: ['a.b'], tools: ['x.y'] }, profiles: { '*': ['tools'], Python: ['web'] } });
+					answer({});
+					await run('removeFromProfile', profileGroup('Python', 'web'), [profileGroup('Python', 'web'), profileGroup('Python', 'tools')]);
+					assert.deepStrictEqual(readGroups().profiles, { '*': ['tools'] });
+				});
+
+				test('Delete Group on several groups asks once, naming them all, and deletes them all', async () => {
+					answer({ confirm: () => true });
+					await run('deleteGroup', group('web'), [group('web'), group('tools'), group('empty')]);
+					assert.strictEqual(seen.confirm.length, 1);
+					assert.ok(['web', 'tools', 'empty'].every(name => (seen.confirm[0].message + seen.confirm[0].detail).includes(name)), seen.confirm[0].message + seen.confirm[0].detail);
+					assert.deepStrictEqual(readGroups().groups, {});
+					assert.deepStrictEqual(readGroups().profiles, {}, 'nobody follows what is gone');
+				});
+
+				test('declining keeps them all', async () => {
+					answer({ confirm: () => false });
+					await run('deleteGroup', group('web'), [group('web'), group('tools')]);
+					assert.deepStrictEqual(Object.keys(readGroups().groups), ['web', 'tools', 'empty']);
+				});
+
+				test('extensions in the selection do not make Delete Group delete anything else', async () => {
+					answer({ confirm: () => true });
+					await run('deleteGroup', group('web'), [group('web'), groupExt('tools', 'x.y')]);
+					assert.deepStrictEqual(Object.keys(readGroups().groups), ['tools', 'empty']);
+					assert.deepStrictEqual(readGroups().groups.tools, ['x.y']);
+				});
+			});
+		});
+
 		suite('the graph view', () => {
 			const GRAPH_COMMAND = 'better-profiles.showGraph';
 			const edges = () => (api.graph.state()?.graph.edges ?? []).map(e => `${e.from}>${e.to}${e.all ? '*' : ''}`).sort();
