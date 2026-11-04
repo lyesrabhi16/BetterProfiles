@@ -18,6 +18,9 @@ import {
 	profileLayout,
 	assignGroup,
 	unassignGroup,
+	excludeFromProfile,
+	includeInProfile,
+	excludedFrom,
 	desiredExtensions,
 	emptyGroups,
 	isExtensionId,
@@ -652,5 +655,110 @@ suite('unassignGroup', () => {
 	test('a profile that does not follow the group is an error', () => {
 		assert.throws(() => unassignGroup(c, 'Rust', 'tools'), /does not follow/i);
 		assert.throws(() => unassignGroup(c, 'Nobody', 'web'), /does not follow/i);
+	});
+});
+
+suite('exclusions: an extension a profile does not want although its group has it', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['a.b', 'c.d'], tools: ['e.f'] },
+		profiles: { Python: ['web', 'tools'], Rust: ['web'] },
+	};
+
+	test('excludeFromProfile records it for that profile only, leaving the group and the other profiles alone', () => {
+		const next = excludeFromProfile(c, 'Python', 'a.b');
+		assert.deepStrictEqual(next.excludes, { Python: ['a.b'] });
+		assert.deepStrictEqual(next.groups, c.groups);
+		assert.deepStrictEqual(excludedFrom(next, 'Rust'), []);
+		assert.strictEqual(c.excludes, undefined, 'the original is untouched');
+	});
+
+	test('it is recorded once, whatever the case', () => {
+		const next = excludeFromProfile(excludeFromProfile(c, 'Python', 'A.B'), 'Python', 'a.b');
+		assert.deepStrictEqual(next.excludes, { Python: ['A.B'] });
+	});
+
+	test('only a valid extension id and a profile name are accepted', () => {
+		assert.throws(() => excludeFromProfile(c, 'Python', '--uninstall-extension'), /not a valid extension id/);
+		assert.throws(() => excludeFromProfile(c, ' ', 'a.b'), /profile name is required/i);
+	});
+
+	test('includeInProfile takes it back, and drops the profile and then the whole key when nothing is left', () => {
+		const two = excludeFromProfile(excludeFromProfile(c, 'Python', 'a.b'), 'Rust', 'a.b');
+		assert.deepStrictEqual(includeInProfile(two, 'Python', 'A.B').excludes, { Rust: ['a.b'] });
+		assert.ok(!('excludes' in includeInProfile(excludeFromProfile(c, 'Python', 'a.b'), 'Python', 'a.b')));
+	});
+
+	test('includeInProfile on something that was not excluded changes nothing', () => {
+		assert.strictEqual(includeInProfile(c, 'Python', 'a.b'), c);
+	});
+
+	test('what a profile wants leaves out its exclusions, whatever the case', () => {
+		const next = excludeFromProfile(c, 'Python', 'A.b');
+		assert.deepStrictEqual(desiredExtensions(next, 'Python').ids, ['c.d', 'e.f']);
+		assert.deepStrictEqual(desiredExtensions(next, 'Rust').ids, ['a.b', 'c.d']);
+	});
+
+	test('a sync does not install an excluded extension', () => {
+		const plan = planSync(excludeFromProfile(c, 'Python', 'a.b'), 'Python', []);
+		assert.deepStrictEqual(plan.toInstall, ['c.d', 'e.f']);
+	});
+
+	test('an excluded extension that is still installed is an extra of the profile', () => {
+		const plan = planCleanup(excludeFromProfile(c, 'Python', 'a.b'), 'Python', ['a.b', 'c.d', 'e.f'], []);
+		assert.deepStrictEqual(plan, { managed: true, extras: ['a.b'] });
+	});
+
+	test('every change to the groups keeps the exclusions', () => {
+		const e = excludeFromProfile(c, 'Python', 'a.b');
+		assert.deepStrictEqual(addToGroup(e, 'web', ['z.z']).excludes, e.excludes);
+		assert.deepStrictEqual(assignGroup(e, 'Rust', 'tools').excludes, e.excludes);
+		assert.deepStrictEqual(unassignGroup(e, 'Rust', 'web').excludes, e.excludes);
+		assert.deepStrictEqual(removeFromGroup(e, 'web', 'c.d').excludes, e.excludes);
+		assert.deepStrictEqual(removeGroup(e, 'tools').excludes, e.excludes);
+		assert.deepStrictEqual(setTriggers(e, 'web', ['**/x']).excludes, e.excludes);
+	});
+
+	test('they are read from the file and written back', () => {
+		const e = excludeFromProfile(c, 'Python', 'a.b');
+		const back = parseGroups(serializeGroups(e));
+		assert.deepStrictEqual(back.config.excludes, { Python: ['a.b'] });
+		assert.deepStrictEqual(back.warnings, []);
+		assert.ok(!serializeGroups(c).includes('excludes'), 'no key when there are none');
+	});
+
+	test('bad entries in the file are ignored with a warning', () => {
+		const { config, warnings } = parseGroups(JSON.stringify({ groups: {}, profiles: {}, excludes: { A: 'x.y', B: ['ok.one', '--bad', 5], C: [] } }));
+		assert.deepStrictEqual(config.excludes, { B: ['ok.one'] });
+		assert.strictEqual(warnings.length, 3, warnings.join(' | '));
+	});
+});
+
+suite('profileLayout with exclusions', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['a.b', 'c.d', 'e.f'] },
+		profiles: { P: ['web'] },
+		excludes: { P: ['c.d'] },
+	};
+
+	test('an excluded extension is no longer part of the group for that profile', () => {
+		const layout = profileLayout(c, 'P', ['a.b']);
+		assert.strictEqual(layout.groups[0].total, 2);
+		assert.deepStrictEqual(layout.groups[0].missing, ['e.f']);
+	});
+
+	test('one that is still installed shows among the other extensions, not in the group', () => {
+		const layout = profileLayout(c, 'P', ['a.b', 'c.d']);
+		assert.deepStrictEqual(layout.groups[0].installed, ['a.b']);
+		assert.deepStrictEqual(layout.others, ['c.d']);
+	});
+
+	test('the group lists what the profile lacks', () => {
+		assert.deepStrictEqual(profileLayout(c, 'P', []).groups[0].missing, ['a.b', 'e.f']);
+		assert.deepStrictEqual(profileLayout(c, 'P', ['a.b', 'e.f']).groups[0].missing, []);
+	});
+
+	test('other profiles are not affected', () => {
+		const other: GroupsConfig = { ...c, profiles: { P: ['web'], Q: ['web'] } };
+		assert.strictEqual(profileLayout(other, 'Q', []).groups[0].total, 3);
 	});
 });

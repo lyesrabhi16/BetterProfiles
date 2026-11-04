@@ -1036,7 +1036,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		suite('contributions', () => {
 			const contributes = () => vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
-			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup', 'clickExtension', 'openExtension', 'copyExtensionId', 'addExtensionToGroup', 'installExtensionInProfiles', 'removeFromProfile'].map(c => `better-profiles.view.${c}`);
+			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup', 'clickExtension', 'openExtension', 'copyExtensionId', 'addExtensionToGroup', 'installExtensionInProfiles', 'removeFromProfile', 'removeExtensionFromProfile'].map(c => `better-profiles.view.${c}`);
 
 			test('an activity bar container called Better Profiles with a Groups and a Profiles view', () => {
 				const containers: { id: string; title: string; icon: string }[] = contributes().viewsContainers?.activitybar ?? [];
@@ -1075,10 +1075,13 @@ suite('Extension groups against a fake CLI', () => {
 						assert.ok(menu.includes(wanted), `${kind} should offer ${wanted}: ${menu.join(', ')}`);
 					}
 				}
-				for (const kind of ['groupExtension', 'profileGroupExtension']) {
-					assert.ok(menuOf(kind).includes('removeFromGroup'), kind + ' can be removed from its group');
+				assert.ok(menuOf('groupExtension').includes('removeFromGroup'), 'in the Groups tree an extension leaves its group');
+				// inside a profile it leaves that profile, never the group the other profiles share
+				for (const kind of ['profileGroupExtension', 'profileExtension']) {
+					assert.ok(menuOf(kind).includes('removeExtensionFromProfile'), kind + ' can be removed from the profile');
+					assert.ok(!menuOf(kind).includes('removeFromGroup'), kind + ' must not offer to change the real group');
 				}
-				assert.ok(!menuOf('profileExtension').includes('removeFromGroup'), 'an ungrouped extension is in no group of this profile');
+				assert.ok(!menuOf('groupExtension').includes('removeExtensionFromProfile'));
 				for (const wanted of ['assignGroup', 'setTriggers', 'deleteGroup']) {
 					assert.ok(menuOf('group').includes(wanted), `group should offer ${wanted}`);
 				}
@@ -1095,12 +1098,13 @@ suite('Extension groups against a fake CLI', () => {
 				const entries: { command: string; when: string; group: string }[] = contributes().menus?.['view/item/context'] ?? [];
 				const inline = (command: string) => entries.filter(e => e.group === 'inline' && e.command === 'better-profiles.view.' + command).map(e => e.when).join(' | ');
 				assert.ok(inline('removeFromGroup').includes('viewItem == groupExtension'), 'in the Groups tree');
-				assert.ok(inline('removeFromGroup').includes('viewItem == profileGroupExtension'), 'inside a group of a profile');
+				assert.ok(!inline('removeFromGroup').includes('profile'), 'not inside a profile');
+				assert.ok(inline('removeExtensionFromProfile').includes('viewItem == profileGroupExtension'), 'inside a group of a profile');
+				assert.ok(inline('removeExtensionFromProfile').includes('viewItem == profileExtension'), 'among the other extensions of a profile');
 				assert.ok(inline('removeFromProfile').includes('viewItem == profileGroup'), 'on a group of a profile');
 				assert.ok(!inline('removeFromProfile').includes('viewItem == group)'), 'never on the group in the Groups tree');
-				assert.ok(!inline('removeFromGroup').includes('viewItem == profileExtension'), 'an ungrouped extension has no group to leave');
 				const commands: { command: string; icon?: string }[] = contributes().commands;
-				for (const command of ['removeFromGroup', 'removeFromProfile']) {
+				for (const command of ['removeFromGroup', 'removeFromProfile', 'removeExtensionFromProfile']) {
 					assert.ok(commands.find(c => c.command === 'better-profiles.view.' + command)?.icon, command + ' needs an icon to show as a button');
 				}
 			});
@@ -1820,10 +1824,10 @@ suite('Extension groups against a fake CLI', () => {
 					assert.deepStrictEqual(installs(), [['--install-extension', 'a.b', '--profile', 'Agents']]);
 				});
 
-				test('Remove From Group works on an extension shown inside a group of a profile, and uninstalls nothing', async () => {
-					await exec('better-profiles.view.removeFromGroup', profileGroupExt('Python', 'web', 'a.b'));
-					assert.deepStrictEqual(readGroups().groups.web, ['c.d']);
-					assert.deepStrictEqual(calls(), []);
+				test('Remove From Group is for the Groups tree: inside a profile it is refused and the group is untouched', async () => {
+					await assert.rejects(exec('better-profiles.view.removeFromGroup', profileGroupExt('Python', 'web', 'a.b')), /item of the Better Profiles tab/);
+					await assert.rejects(exec('better-profiles.view.removeFromGroup', profileExt('Python', 'p.installed')), /item of the Better Profiles tab/);
+					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
 				});
 
 				test('an item with an invalid extension id is refused', async () => {
@@ -1833,13 +1837,228 @@ suite('Extension groups against a fake CLI', () => {
 				});
 			});
 
+			suite('Remove From Profile on a group also uninstalls its extensions from that profile', () => {
+				type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
+				const removeGroup = (group = 'web', profileName = 'Python') => exec<Report>('better-profiles.view.removeFromProfile', profileGroup(profileName, group));
+
+				setup(() => writeState({ Default: ['common.one'], Python: ['a.b', 'c.d', 'p.installed', 'shared.x'], Agents: ['shared.x'] }));
+
+				test('after asking, the profile stops following the group and loses the extensions of the group, and nothing else', async () => {
+					answer({ confirm: () => true });
+					const report = await removeGroup();
+					assert.deepStrictEqual(report.uninstalled, ['a.b', 'c.d']);
+					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x']);
+					assert.deepStrictEqual(readState().Agents, ['shared.x'], 'other profiles are untouched');
+					assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'a.b', '--profile', 'Python'], ['--uninstall-extension', 'c.d', '--profile', 'Python']]);
+					assert.ok(!('Python' in readGroups().profiles));
+					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d'], 'the group itself stays, for every other profile');
+				});
+
+				test('the question names what will be uninstalled and from where', async () => {
+					answer({ confirm: () => false });
+					await removeGroup();
+					assert.strictEqual(seen.confirm.length, 1);
+					assert.ok(seen.confirm[0].message.includes('Python'), seen.confirm[0].message);
+					assert.ok(seen.confirm[0].detail.includes('a.b') && seen.confirm[0].detail.includes('c.d'), seen.confirm[0].detail);
+				});
+
+				test('declined: the profile keeps the group and every extension', async () => {
+					answer({ confirm: () => false });
+					const report = await removeGroup();
+					assert.strictEqual(report.cancelled, true);
+					assert.deepStrictEqual(readGroups().profiles.Python, ['web']);
+					assert.deepStrictEqual(readState().Python, ['a.b', 'c.d', 'p.installed', 'shared.x']);
+					assert.deepStrictEqual(uninstalls(), []);
+				});
+
+				test('an extension that another group of the profile still wants stays', async () => {
+					writeGroups({ groups: { web: ['a.b', 'c.d'], keep: ['a.b'] }, profiles: { Python: ['web', 'keep'] } });
+					answer({ confirm: () => true });
+					const report = await removeGroup();
+					assert.deepStrictEqual(report.uninstalled, ['c.d']);
+					assert.ok(readState().Python.includes('a.b'));
+				});
+
+				test('so does one that a group given to all profiles wants', async () => {
+					writeGroups({ groups: { web: ['a.b', 'c.d'], all: ['a.b'] }, profiles: { '*': ['all'], Python: ['web'] } });
+					answer({ confirm: () => true });
+					assert.deepStrictEqual((await removeGroup()).uninstalled, ['c.d']);
+				});
+
+				test('this extension is never uninstalled', async () => {
+					writeGroups({ groups: { web: ['lyesrabhi.better-profiles', 'c.d'] }, profiles: { Python: ['web'] } });
+					writeState({ Default: [], Python: ['lyesrabhi.better-profiles', 'c.d'], Agents: [] });
+					answer({ confirm: () => true });
+					const report = await removeGroup();
+					assert.deepStrictEqual(report.uninstalled, ['c.d']);
+					assert.deepStrictEqual(report.kept, ['lyesrabhi.better-profiles']);
+					assert.ok(readState().Python.includes('lyesrabhi.better-profiles'));
+				});
+
+				test('what keepExtensions lists stays', async () => {
+					await set('keepExtensions', ['c.d']);
+					answer({ confirm: () => true });
+					const report = await removeGroup();
+					assert.deepStrictEqual(report.uninstalled, ['a.b']);
+					assert.deepStrictEqual(report.kept, ['c.d']);
+				});
+
+				test('what is installed in every profile stays: VS Code installs those for all profiles at once', async () => {
+					writeState({ Default: ['a.b'], Python: ['a.b', 'c.d'], Agents: ['a.b'] });
+					answer({ confirm: () => true });
+					const report = await removeGroup();
+					assert.deepStrictEqual(report.uninstalled, ['c.d']);
+					assert.deepStrictEqual(report.kept, ['a.b']);
+					assert.ok(seen.confirm[0].detail.includes('a.b'), 'the question should say it is kept');
+				});
+
+				test('one that cannot be uninstalled is reported and the others still go', async () => {
+					writeGroups({ groups: { web: ['fail.one', 'c.d'] }, profiles: { Python: ['web'] } });
+					writeState({ Default: [], Python: ['fail.one', 'c.d'], Agents: [] });
+					answer({ confirm: () => true });
+					const report = await removeGroup();
+					assert.deepStrictEqual(report.failed, ['fail.one']);
+					assert.deepStrictEqual(report.uninstalled, ['c.d']);
+					assert.deepStrictEqual(readState().Python, ['fail.one']);
+					assert.ok(!('Python' in readGroups().profiles), 'the profile still stops following the group');
+				});
+
+				test('the Profiles tree shows the result at once', async () => {
+					answer({ confirm: () => true });
+					await children('profiles', profile('Python'));
+					await removeGroup();
+					const kids = await children('profiles', profile('Python'));
+					assert.ok(!kids.some(n => n.kind === 'profileGroup' && n.name === 'web'));
+					assert.ok(!kids.some(n => n.id === 'a.b'), 'gone from the list of the profile too');
+				});
+			});
+
+			suite('Remove From Profile on an extension uninstalls it from that profile only', () => {
+				type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
+				const removeExtension = (node: Node) => exec<Report>('better-profiles.view.removeExtensionFromProfile', node);
+
+				setup(() => writeState({ Default: ['common.one'], Python: ['a.b', 'c.d', 'p.installed', 'shared.x'], Agents: ['shared.x'] }));
+
+				test('an extension of a group of the profile is uninstalled from it, and the profile is told not to want it', async () => {
+					answer({ confirm: () => true });
+					const report = await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					assert.deepStrictEqual(report.uninstalled, ['a.b']);
+					assert.deepStrictEqual(readState().Python, ['c.d', 'p.installed', 'shared.x']);
+					assert.deepStrictEqual(readGroups().excludes, { Python: ['a.b'] });
+					assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'a.b', '--profile', 'Python']]);
+				});
+
+				test('the real group is not touched, and other profiles that follow it keep the extension', async () => {
+					writeGroups({ groups: { web: ['a.b', 'c.d'] }, profiles: { Python: ['web'], Agents: ['web'] } });
+					writeState({ Default: [], Python: ['a.b', 'c.d'], Agents: ['a.b', 'c.d'] });
+					answer({ confirm: () => true });
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
+					assert.deepStrictEqual(readGroups().profiles, { Python: ['web'], Agents: ['web'] });
+					assert.deepStrictEqual(readState().Agents, ['a.b', 'c.d']);
+				});
+
+				test('one of the other extensions of the profile is uninstalled and nothing is recorded: no group wants it', async () => {
+					answer({ confirm: () => true });
+					await removeExtension(profileExt('Python', 'p.installed'));
+					assert.deepStrictEqual(readState().Python, ['a.b', 'c.d', 'shared.x']);
+					assert.strictEqual(readGroups().excludes, undefined);
+				});
+
+				test('the question says it leaves this profile only, and the group stays as it is', async () => {
+					answer({ confirm: () => false });
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					assert.ok(seen.confirm[0].message.includes('a.b') && seen.confirm[0].message.includes('Python'), seen.confirm[0].message);
+					assert.ok(/group/i.test(seen.confirm[0].detail), seen.confirm[0].detail);
+				});
+
+				test('declined: nothing changes', async () => {
+					answer({ confirm: () => false });
+					const report = await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					assert.strictEqual(report.cancelled, true);
+					assert.deepStrictEqual(readState().Python, ['a.b', 'c.d', 'p.installed', 'shared.x']);
+					assert.strictEqual(readGroups().excludes, undefined);
+				});
+
+				test('a sync afterwards does not bring it back', async () => {
+					answer({ confirm: () => true });
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					await sync({ profile: 'Python' });
+					assert.deepStrictEqual(installs(), []);
+				});
+
+				test('the Profiles tree no longer counts it as part of the group of that profile', async () => {
+					answer({ confirm: () => true });
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					const web = await item('profiles', profileGroup('Python', 'web'));
+					assert.ok(String(web.description).includes('1 of 1'), String(web.description));
+					assert.deepStrictEqual((await children('profiles', profileGroup('Python', 'web'))).map(n => n.id), ['c.d']);
+				});
+
+				test('installing it into the profile again lifts the exclusion', async () => {
+					answer({ confirm: () => true });
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					await drop('profiles', profile('Python'), await drag('groups', [groupExt('web', 'a.b')]));
+					assert.ok(readState().Python.includes('a.b'));
+					assert.strictEqual(readGroups().excludes, undefined);
+				});
+
+				test('what is not installed yet but wanted is just recorded, without asking', async () => {
+					writeState({ Default: [], Python: ['c.d'], Agents: [] });
+					answer({});
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					assert.strictEqual(seen.confirm.length, 0);
+					assert.deepStrictEqual(readGroups().excludes, { Python: ['a.b'] });
+					assert.deepStrictEqual(uninstalls(), []);
+				});
+
+				test('this extension, what keepExtensions lists and what every profile has are refused and nothing changes', async () => {
+					await set('keepExtensions', ['a.b']);
+					writeGroups({ groups: { web: ['a.b', 'lyesrabhi.better-profiles', 'c.d'] }, profiles: { Python: ['web'] } });
+					writeState({ Default: ['c.d'], Python: ['a.b', 'lyesrabhi.better-profiles', 'c.d'], Agents: ['c.d'] });
+					answer({ confirm: () => true });
+					for (const id of ['a.b', 'lyesrabhi.better-profiles', 'c.d']) {
+						const report = await removeExtension(profileGroupExt('Python', 'web', id));
+						assert.deepStrictEqual(report.kept, [id]);
+						assert.deepStrictEqual(report.uninstalled, []);
+					}
+					assert.strictEqual(readGroups().excludes, undefined);
+					assert.deepStrictEqual(uninstalls(), []);
+					assert.strictEqual(seen.confirm.length, 0);
+				});
+
+				test('when it cannot be uninstalled nothing is recorded, so the profile is not left half way', async () => {
+					writeGroups({ groups: { web: ['fail.one'] }, profiles: { Python: ['web'] } });
+					writeState({ Default: [], Python: ['fail.one'], Agents: [] });
+					answer({ confirm: () => true });
+					const report = await removeExtension(profileGroupExt('Python', 'web', 'fail.one'));
+					assert.deepStrictEqual(report.failed, ['fail.one']);
+					assert.strictEqual(readGroups().excludes, undefined);
+				});
+
+				test('it is refused on an item of the Groups tree (that one belongs to the real group) and on anything else', async () => {
+					answer({ confirm: () => true });
+					await assert.rejects(removeExtension(groupExt('web', 'a.b')), /item of the Better Profiles tab/);
+					await assert.rejects(removeExtension(profile('Python')), /item of the Better Profiles tab/);
+					assert.deepStrictEqual(uninstalls(), []);
+				});
+
+				test('an invalid id is refused before anything runs', async () => {
+					answer({ confirm: () => true });
+					await assert.rejects(removeExtension(profileExt('Python', '--uninstall-extension')), /not a valid extension id/);
+					assert.deepStrictEqual(calls(), []);
+				});
+			});
+
 			suite('the right-click commands of a group shown inside a profile', () => {
-				test('Remove From Profile makes the profile stop following the group, and keeps the group and every extension', async () => {
+				test('Remove From Profile makes the profile stop following the group and keeps the group; when the profile has none of its extensions nothing is asked or uninstalled', async () => {
+					answer({});
 					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
 					assert.ok(!('Python' in readGroups().profiles), 'Python followed only web');
 					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d'], 'the group itself is untouched');
-					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x'], 'nothing is uninstalled');
-					assert.deepStrictEqual(calls(), []);
+					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x']);
+					assert.strictEqual(seen.confirm.length, 0);
+					assert.deepStrictEqual(uninstalls(), []);
 				});
 
 				test('the other profiles that follow the group keep it', async () => {
