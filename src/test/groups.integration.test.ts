@@ -585,6 +585,14 @@ suite('Extension groups against a fake CLI', () => {
 				}
 			});
 
+			test('their titles start with the [Better Profiles] tag, so they can be told apart in a menu full of other extensions\' entries', () => {
+				const commands: { command: string; title: string }[] = contributes().commands;
+				for (const id of ALL) {
+					const title = commands.find(c => c.command === id)!.title;
+					assert.ok(title.startsWith('[Better Profiles] '), title);
+				}
+			});
+
 			test('they are declared and registered, and kept out of the Command Palette because they need an extension to act on', async () => {
 				const declared = (contributes().commands as { command: string }[]).map(c => c.command);
 				const registered = new Set(await vscode.commands.getCommands(true));

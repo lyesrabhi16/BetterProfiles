@@ -21,14 +21,14 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
-- The Extensions view gear menu now shows `Remove from Better Profiles Group…` only for extensions that are in a group, and the
-  `Add to Better Profiles Group…` list marks the groups that already hold the extension. (A menu label is fixed text, so the
+- The Extensions view gear menu now shows `[Better Profiles] Remove from Group…` only for extensions that are in a group, and the
+  `[Better Profiles] Add to Group…` list marks the groups that already hold the extension. (A menu label is fixed text, so the
   group names themselves cannot be shown in the menu.)
 - The notifications after adding an extension to a group, or giving a group to a profile, now have a button for the next
   step (`Sync Profile…`, or `Give Group To A Profile…` when no profile follows the group) instead of telling you which command
   to run.
 - Three entries in the Extensions view gear menu (the `extension/context` menu, next to "Apply Extension to all Profiles"):
-  `Add to Better Profiles Group…`, `Remove from Better Profiles Group…` and `Install in Other Profiles…`. Removing from a
+  `[Better Profiles] Add to Group…`, `[Better Profiles] Remove from Group…` and `[Better Profiles] Install in Other Profiles…`. Removing from a
   group never uninstalls anything, and installing only offers profiles that lack the extension.
 - Development: `flake.nix` with a default and a headless dev shell, and install / run-from-source / test instructions in the README.
 - Install when needed: a group can have workspace triggers (globs such as `**/pubspec.yaml`). The automatic check

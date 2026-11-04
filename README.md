@@ -104,12 +104,12 @@ they are not in the Command Palette because they need an extension to act on.
 
 | Entry | What it does |
 |---|---|
-| **Add to Better Profiles Group…** | Pick a group, or type a name to start one, and the extension is added to it. The notification that follows has a button for the next step: **Sync Profile…**, or **Give Group To A Profile…** if no profile follows the group yet. |
-| **Remove from Better Profiles Group…** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
-| **Install in Other Profiles…** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
+| **[Better Profiles] Add to Group…** | Pick a group, or type a name to start one, and the extension is added to it. The notification that follows has a button for the next step: **Sync Profile…**, or **Give Group To A Profile…** if no profile follows the group yet. |
+| **[Better Profiles] Remove from Group…** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
+| **[Better Profiles] Install in Other Profiles…** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
 
 A menu entry's label is fixed text in VS Code, so group names cannot be written into the menu itself; the **Add** list marks the groups that already hold the extension.
-They show for installed extensions that are not built into VS Code. "Install in Other Profiles…" asks the command line
+They show for installed extensions that are not built into VS Code. "[Better Profiles] Install in Other Profiles…" asks the command line
 about every profile first, so an extension that every profile already has (application scoped) gets a message and
 nothing else.
 

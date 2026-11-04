@@ -63,15 +63,15 @@
       },
       {
         "command": "better-profiles.extensionAddToGroup",
-        "title": "Add to Better Profiles Group…"
+        "title": "[Better Profiles] Add to Group…"
       },
       {
         "command": "better-profiles.extensionRemoveFromGroup",
-        "title": "Remove from Better Profiles Group…"
+        "title": "[Better Profiles] Remove from Group…"
       },
       {
         "command": "better-profiles.extensionInstallInProfiles",
-        "title": "Install in Other Profiles…"
+        "title": "[Better Profiles] Install in Other Profiles…"
       }
     ],
     "configuration": {
