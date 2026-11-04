@@ -59,9 +59,17 @@ suite('ProfileIndexReader', () => {
 		assert.strictEqual((await reader.read(file))?.length, 2);
 	});
 
-	test('a missing file is an empty profile, not an error', async () => {
+	test('a missing file is not known to be an empty profile: undefined, so the caller decides (a wrong path must never look like "no extensions")', async () => {
 		const reader = new ProfileIndexReader();
-		assert.deepStrictEqual(await reader.read(path.join(dir, 'nope.json')), []);
+		assert.strictEqual(await reader.read(path.join(dir, 'nope.json')), undefined);
+	});
+
+	test('a file that disappears is no longer remembered', async () => {
+		write([entry('a.b')], 1_000_000);
+		const reader = new ProfileIndexReader();
+		await reader.read(file);
+		fs.rmSync(file);
+		assert.strictEqual(await reader.read(file), undefined);
 	});
 
 	test('a file that cannot be understood gives undefined, so that the caller asks the command line', async () => {

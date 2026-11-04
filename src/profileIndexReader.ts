@@ -15,17 +15,14 @@ export class ProfileIndexReader {
 	/** For the tests: how often a file was only looked at and how often it was read. */
 	readonly stats = { looks: 0, reads: 0 };
 
-	/** The entries of the file; [] when there is no file; undefined when it cannot be understood. */
+	/** The entries of the file; undefined when there is no file or it cannot be understood (the caller must not assume "empty"). */
 	async read(file: string): Promise<IndexEntry[] | undefined> {
 		let stat;
 		try {
 			stat = await fs.stat(file);
 			this.stats.looks++;
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-				this.known.delete(file);
-				return [];
-			}
+			this.known.delete(file);
 			return undefined;
 		}
 		const before = this.known.get(file);
