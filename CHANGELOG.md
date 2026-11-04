@@ -11,6 +11,8 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- The Profiles tree of the Better Profiles tab did not follow changes to the groups: a group given to a profile (by a drop,
+  a command or the groups file) only showed in it after Refresh. It now redraws at once, without asking the command line again.
 - Dragging from one tree of the Better Profiles tab onto the other did nothing (an extension onto a group, a group onto a
   profile, extensions onto a profile). VS Code delivered its own entry for the dragged tree next to ours under the same type
   name, and ours was never read. Drags now carry their own type and every entry of it is read. Drags inside one tree were fine.

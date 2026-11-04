@@ -1212,14 +1212,14 @@ suite('Extension groups against a fake CLI', () => {
 			});
 
 			test('a group given to a profile by a drop shows in that profile at once', async () => {
-				const before = (await children('profiles', profile('Agents'))).map(n => n.kind);
-				assert.ok(!before.includes('profileGroup'));
+				const hasWeb = async () => (await children('profiles', profile('Agents'))).some(n => n.kind === 'profileGroup' && n.name === 'web');
+				assert.ok(!(await hasWeb()), 'Agents does not follow web yet');
 				let fired = 0;
 				const subscription = provider('profiles').onDidChangeTreeData?.(() => fired++);
 				await drop('profiles', profile('Agents'), await drag('groups', [group('web')]));
 				assert.ok(await until(() => fired > 0));
 				subscription?.dispose();
-				assert.ok((await children('profiles', profile('Agents'))).some(n => n.kind === 'profileGroup' && n.name === 'web'));
+				assert.ok(await hasWeb());
 			});
 
 			test('the list is asked for once and cached until refresh', async () => {

@@ -110,7 +110,10 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 	readonly onDidChangeTreeData = this.changed.event;
 	private cache = new Map<string, Promise<InstalledExtension[]>>();
 
-	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) { }
+	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) {
+		// the groups decide how a profile's extensions are laid out; what each profile has is unchanged, so its lists are kept
+		core.onDidChangeGroups(() => this.changed.fire());
+	}
 
 	/** Forgets every list and reads them again when a profile is next opened. */
 	refresh(): void {
