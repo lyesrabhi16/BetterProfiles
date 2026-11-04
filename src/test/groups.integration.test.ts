@@ -1473,6 +1473,13 @@ suite('Extension groups against a fake CLI', () => {
 				return false;
 			};
 			const ids = async (view: ViewName, node: Node) => (await children(view, node)).map(n => n.id);
+			/** Every extension node of a profile, those inside its groups too. */
+			const allOf = async (profileName: string): Promise<Node[]> => {
+				const top = await children('profiles', profile(profileName));
+				const inside = await Promise.all(top.filter(n => n.kind === 'profileGroup').map(n => children('profiles', n)));
+				return [...top.filter(n => n.kind !== 'profileGroup'), ...inside.flat()];
+			};
+			const idsOf = async (profileName: string) => (await allOf(profileName)).map(n => n.id as string).sort();
 			const listCalls = () => calls().filter(a => a.includes('--list-extensions')).length;
 			teardown(() => {
 				delete process.env.STUB_ACTION_DELAY_MS;
@@ -1540,7 +1547,7 @@ suite('Extension groups against a fake CLI', () => {
 					process.env.STUB_ACTION_DELAY_MS = '1200';
 					writeState({ Default: [], Python: ['p.installed'], Agents: [] });
 					const running = sync({ profile: 'Python' });
-					assert.ok(await untilAsync(async () => (await children('profiles', profile('Python'))).some(n => n.installing === true), 900), 'what is being installed is shown within a second');
+					assert.ok(await untilAsync(async () => (await allOf('Python')).some(n => n.installing === true), 900), 'what is being installed is shown within a second');
 					await running;
 				});
 
@@ -1571,6 +1578,7 @@ suite('Extension groups against a fake CLI', () => {
 					writeIndex(defaultIndex(), [entry('common.one'), entry('app.wide', { isApplicationScoped: true })]);
 					writeIndex(profileIndex('p1'), [entry('p.installed'), entry('shared.x')]);
 					writeIndex(profileIndex('a1'), [entry('shared.x')]);
+					writeGroups({ groups: {}, profiles: {} }); // no groups: the extensions of a profile are then a flat list
 					await set('storageFile', storage);
 					await set('extensionsDir', path.join(root, 'extensions'));
 					await set('listFromFiles', true);
@@ -1579,8 +1587,8 @@ suite('Extension groups against a fake CLI', () => {
 				teardown(() => fs.rmSync(root, { recursive: true, force: true }));
 
 				test('the tree shows a profile without a single run of the command line', async () => {
-					assert.deepStrictEqual((await ids('profiles', profile('Python'))).sort(), ['app.wide', 'p.installed', 'shared.x']);
-					assert.deepStrictEqual((await ids('profiles', profile('Default'))).sort(), ['app.wide', 'common.one']);
+					assert.deepStrictEqual(await idsOf('Python'), ['app.wide', 'p.installed', 'shared.x']);
+					assert.deepStrictEqual(await idsOf('Default'), ['app.wide', 'common.one']);
 					assert.strictEqual(listCalls(), 0);
 				});
 
@@ -1590,21 +1598,21 @@ suite('Extension groups against a fake CLI', () => {
 
 				test('a profile whose folder exists but has no list yet is an empty profile', async () => {
 					fs.rmSync(profileIndex('a1'));
-					assert.deepStrictEqual(await ids('profiles', profile('Agents')), ['app.wide']);
+					assert.deepStrictEqual(await idsOf('Agents'), ['app.wide']);
 					assert.strictEqual(listCalls(), 0);
 				});
 
 				test('a profile VS Code has no folder for is not assumed empty: the command line is asked', async () => {
 					fs.rmSync(path.dirname(profileIndex('a1')), { recursive: true });
 					state_for_cli();
-					assert.deepStrictEqual(await ids('profiles', profile('Agents')), ['shared.x']);
+					assert.deepStrictEqual(await idsOf('Agents'), ['shared.x']);
 					assert.ok(listCalls() > 0);
 				});
 
 				test('a list that cannot be understood is not trusted: the command line is asked', async () => {
 					fs.writeFileSync(profileIndex('p1'), '{ broken');
 					state_for_cli();
-					assert.deepStrictEqual((await ids('profiles', profile('Python'))).sort(), ['p.installed', 'shared.x']);
+					assert.deepStrictEqual(await idsOf('Python'), ['p.installed', 'shared.x']);
 					assert.ok(listCalls() > 0);
 				});
 
@@ -1620,7 +1628,7 @@ suite('Extension groups against a fake CLI', () => {
 					await ids('profiles', profile('Python'));
 					await new Promise(resolve => setTimeout(resolve, 300)); // the watcher is set up when a file is first read
 					writeIndex(profileIndex('p1'), [entry('p.installed'), entry('shared.x'), entry('just.arrived')]);
-					assert.ok(await untilAsync(async () => (await ids('profiles', profile('Python'))).includes('just.arrived'), 4000), 'noticed within a few seconds');
+					assert.ok(await untilAsync(async () => (await idsOf('Python')).includes('just.arrived'), 4000), 'noticed within a few seconds');
 					assert.strictEqual(listCalls(), 0);
 				});
 

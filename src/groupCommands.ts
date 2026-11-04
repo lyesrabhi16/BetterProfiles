@@ -1,3 +1,4 @@
+import { FSWatcher, watch } from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -7,6 +8,7 @@ import {
 	CliInvocation,
 	DEFAULT_PROFILE_NAME,
 	InstallResult,
+	InstalledExtension,
 	Runner,
 	defaultRunner,
 	installExtension,
@@ -15,9 +17,12 @@ import {
 	isInstalledExtensionPath,
 	pickExtensionsDir,
 	resolveCli,
-	uninstallExtension,
 	userDataDirFromGlobalStorage,
+	userDataDirFromStorageFile,
 } from './cli';
+import { IndexEntry, indexPath, listFromIndexes } from './profileIndex';
+import { ProfileIndexReader } from './profileIndexReader';
+import { ProfileStore } from './profileStore';
 import {
 	ALL_PROFILES,
 	GroupsConfig,
@@ -130,8 +135,6 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	let grouped: readonly string[] = [];
 	const groupsChanged = new vscode.EventEmitter<void>();
-	/** A profile's own list of extensions changed (something was uninstalled from it). */
-	const profileExtensionsChanged = new vscode.EventEmitter<{ profile: string; removed: string[] }>();
 
 	/**
 	 * A menu entry's label is fixed text, so group names cannot appear in the Extensions view menu. What a menu can do
@@ -185,6 +188,87 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return resolved;
 	}
 
+	// ---- what each profile has -----------------------------------------------------------------------------------
+
+	const indexReader = new ProfileIndexReader();
+	const watchers = new Map<string, FSWatcher>();
+	let redrawTimer: NodeJS.Timeout | undefined;
+
+	/** The user data folder, as far as the storage file in use says (a test, a portable install), else this window's. */
+	const userDataDir = (): string => {
+		const configured = settings().get<string>('storageFile')?.trim();
+		return (configured ? userDataDirFromStorageFile(configured) : undefined) ?? userDataDirFromGlobalStorage(context.globalStorageUri.fsPath);
+	};
+
+	/** Something else (the Extensions view, another window) changed a list: forget what was known, and the trees redraw. */
+	function watchFolder(dir: string): void {
+		if (watchers.has(dir)) {
+			return;
+		}
+		try {
+			const watcher = watch(dir, (_event, name) => {
+				if (name && name !== 'extensions.json') {
+					return;
+				}
+				clearTimeout(redrawTimer);
+				redrawTimer = setTimeout(() => {
+					indexReader.forget();
+					store.invalidate();
+				}, 150);
+			});
+			watcher.on('error', () => { watcher.close(); watchers.delete(dir); });
+			watchers.set(dir, watcher);
+		} catch {
+			// no watching here: the lists are then read again whenever a command needs them
+		}
+	}
+
+	/** A profile's extensions from the files VS Code keeps, which is instant; undefined when they cannot be trusted. */
+	async function listFromFiles(profile: string): Promise<InstalledExtension[] | undefined> {
+		if (settings().get<boolean>('listFromFiles') === false) {
+			return undefined;
+		}
+		const known = await api.getProfiles();
+		const where = (name: string) => indexPath({ profile: name, defaultName: DEFAULT_PROFILE_NAME, extensionsDir: extensionsDir(), userDataDir: userDataDir(), locationOf: other => known.find(p => p.name === other)?.location });
+		const file = where(profile);
+		if (!file) {
+			return undefined;
+		}
+		watchFolder(path.dirname(file));
+		let own = await indexReader.read(file);
+		if (own === undefined) {
+			// Only a profile that has a folder of its own but no list file yet is known to have no extensions. A file that is
+			// there and cannot be understood, or a folder that is not there, says nothing: the command line is asked.
+			const there = (target: string) => fs.stat(target).then(() => true, () => false);
+			if (profile === DEFAULT_PROFILE_NAME || await there(file) || !await there(path.dirname(file))) {
+				return undefined;
+			}
+			own = [];
+		}
+		let defaults: IndexEntry[] | undefined;
+		if (profile !== DEFAULT_PROFILE_NAME) {
+			const defaultFile = where(DEFAULT_PROFILE_NAME);
+			defaults = defaultFile ? await indexReader.read(defaultFile) : undefined;
+			if (defaults === undefined) {
+				return undefined; // the application-scoped extensions live there: without them the list would be wrong
+			}
+		}
+		return listFromIndexes(own, defaults);
+	}
+
+	/** The files when they can be read, else the command line (which starts a whole VS Code, hence the caching in the store). */
+	async function readProfile(profile: string): Promise<InstalledExtension[]> {
+		let fromFiles: InstalledExtension[] | undefined;
+		try {
+			fromFiles = await listFromFiles(profile);
+		} catch (error) {
+			log.warn(`Could not read the extension list of "${profile}" from VS Code's files: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		return fromFiles ?? listExtensions(resolveCliOrThrow(), run, profile);
+	}
+
+	const store = new ProfileStore(readProfile);
+
 	async function pickProfile(title: string, options: { includeAll?: boolean } = {}): Promise<string | undefined> {
 		const current = (await api.getCurrentProfile())?.name;
 		const items: PickItem[] = (await profileNames()).map(name => ({ id: name, label: name, description: name === current ? 'current' : undefined }));
@@ -220,6 +304,9 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	const withProgress = <T>(title: string, task: () => Promise<T>) =>
 		vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task);
+	/** For looking at things, which is usually instant: a spinner in the status bar, not a notification that flashes. */
+	const looking = <T>(title: string, task: () => Promise<T>) =>
+		vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title }, task);
 
 	const editGroups = async (args?: { open?: boolean }): Promise<string> => {
 		const file = groupsFilePath();
@@ -365,12 +452,8 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		const cli = resolveCliOrThrow();
 
-		const has = new Map<string, boolean>();
-		await withProgress(`Looking for ${id} in every profile…`, async () => {
-			for (const name of names) {
-				has.set(name, (await listExtensions(cli, run, name)).some(e => lower(e.id) === lower(id)));
-			}
-		});
+		const found = await looking(`Looking for ${id} in every profile…`, () => Promise.all(names.map(async name => [name, (await store.list(name, { maxAgeMs: 0 })).some(e => lower(e.id) === lower(id))] as const)));
+		const has = new Map(found);
 		const alreadyHad = names.filter(name => has.get(name));
 		const lacking = names.filter(name => !has.get(name));
 		if (lacking.length === 0) {
@@ -389,6 +472,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			targets = lacking.filter(name => picked.includes(name));
 		}
 
+		targets.forEach(profile => store.installing(profile, [id])); // shown in those profiles now, while the command line works
 		const results = await withProgress(`Installing ${id}…`, async () => {
 			const done: { profile: string; ok: boolean; message: string }[] = [];
 			for (const profile of targets) {
@@ -396,6 +480,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 				if (!result.ok) {
 					log.error(`${id} -> ${profile}: ${result.message}`);
 				}
+				result.ok ? store.added(profile, [id]) : store.settle(profile, [id]);
 				done.push({ profile, ok: result.ok, message: result.message });
 			}
 			return done;
@@ -438,18 +523,13 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	const compareProfiles = async (args?: { open?: boolean }): Promise<string> => {
 		const names = await profileNames();
-		const cli = resolveCliOrThrow();
-		const columns = await withProgress('Comparing the extensions of every profile…', async () => {
-			const result = [];
-			for (const profile of names) {
-				try {
-					result.push({ profile, ids: (await listExtensions(cli, run, profile)).map(e => e.id) });
-				} catch (error) {
-					throw new Error(`Could not list the extensions of "${profile}": ${error instanceof Error ? error.message : String(error)}`);
-				}
+		const columns = await looking('Comparing the extensions of every profile…', () => Promise.all(names.map(async profile => {
+			try {
+				return { profile, ids: (await store.list(profile, { maxAgeMs: 0 })).map(e => e.id) };
+			} catch (error) {
+				throw new Error(`Could not list the extensions of "${profile}": ${error instanceof Error ? error.message : String(error)}`);
 			}
-			return result;
-		});
+		})));
 		const markdown = `# Extensions per profile\n\n${renderMatrix(columns)}`;
 		if (args?.open !== false) {
 			await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'markdown', content: markdown }));
@@ -457,10 +537,10 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return markdown;
 	};
 
-	/** What every profile has, by profile. The runs of the CLI go side by side: each one is mostly start-up. */
-	async function listEveryProfile(cli: CliInvocation, known: Map<string, string[]> = new Map()): Promise<Map<string, string[]>> {
+	/** What every profile has now, by profile: from the files that is instant, and the reads go side by side. */
+	async function everyProfile(known: Map<string, string[]> = new Map()): Promise<Map<string, string[]>> {
 		const names = await profileNames();
-		const lists = await Promise.all(names.map(async name => known.get(name) ?? (await listExtensions(cli, run, name)).map(e => e.id)));
+		const lists = await Promise.all(names.map(async name => known.get(name) ?? (await store.list(name, { maxAgeMs: 0 })).map(e => e.id)));
 		return new Map(names.map((name, i) => [name, lists[i]]));
 	}
 
@@ -473,43 +553,48 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	];
 
 	/** Everything the profile has that its groups do not, minus what must never be offered for removal. */
-	async function findExtras(cli: CliInvocation, profile: string, config: GroupsConfig): Promise<string[]> {
-		const lists = await listEveryProfile(cli);
+	async function findExtras(profile: string, config: GroupsConfig): Promise<string[]> {
+		const lists = await looking(`Looking at what "${profile}" has…`, () => everyProfile());
 		return planCleanup(config, profile, lists.get(profile) ?? [], protectedFromRemoval(lists)).extras;
 	}
 
 	/** Which of these the profile has, split into what can go and what must stay. */
-	async function planRemoval(cli: CliInvocation, profile: string, ids: string[]): Promise<{ remove: string[]; kept: string[] }> {
-		return withProgress(`Looking at what "${profile}" has…`, async () => {
-			// the profile first: when it has none of them there is nothing to protect, and the others need not be listed
-			const own = (await listExtensions(cli, run, profile)).map(e => e.id);
+	async function planRemoval(profile: string, ids: string[]): Promise<{ remove: string[]; kept: string[] }> {
+		return looking(`Looking at what "${profile}" has…`, async () => {
+			// the profile first: when it has none of them there is nothing to protect, and the others need not be read
+			const own = (await store.list(profile, { maxAgeMs: 0 })).map(e => e.id);
 			const have = new Map(own.map(id => [lower(id), id]));
 			const here = [...new Set(ids.map(lower))].flatMap(id => have.get(id) ?? []);
 			if (here.length === 0) {
 				return { remove: [], kept: [] };
 			}
-			const lists = await listEveryProfile(cli, new Map([[profile, own]]));
-			const protectedIds = new Set(protectedFromRemoval(lists).map(lower));
+			const protectedIds = new Set(protectedFromRemoval(await everyProfile(new Map([[profile, own]]))).map(lower));
 			return { remove: here.filter(id => !protectedIds.has(lower(id))), kept: here.filter(id => protectedIds.has(lower(id))) };
 		});
 	}
 
-	async function uninstallAll(cli: CliInvocation, profile: string, ids: string[], report: RemovalReport): Promise<void> {
+	/**
+	 * Uninstalls extensions from a profile. They leave the trees at once (the command line takes a while); the ones it could
+	 * not remove come back. All in one run of the command line.
+	 */
+	async function uninstallFrom(cli: CliInvocation, profile: string, ids: string[]): Promise<InstallResult[]> {
 		if (ids.length === 0) {
-			return;
+			return [];
 		}
-		const results = await withProgress(`Uninstalling ${ids.length === 1 ? ids[0] : `${ids.length} extensions`} from "${profile}"…`, () => uninstallExtensions(cli, run, ids, profile));
-		for (const result of results) {
-			if (result.ok) {
-				report.uninstalled.push(result.id);
-			} else {
-				log.error(`uninstall ${result.id} <- ${profile}: ${result.message}`);
-				report.failed.push(result.id);
-			}
+		store.removing(profile, ids);
+		let results: InstallResult[];
+		try {
+			results = await withProgress(`Uninstalling ${ids.length === 1 ? ids[0] : `${ids.length} extensions`} from "${profile}"…`, () => uninstallExtensions(cli, run, ids, profile));
+		} catch (error) {
+			store.settle(profile, ids);
+			throw error;
 		}
-		if (report.uninstalled.length > 0) {
-			profileExtensionsChanged.fire({ profile, removed: [...report.uninstalled] });
+		for (const result of results.filter(r => !r.ok)) {
+			log.error(`uninstall ${result.id} <- ${profile}: ${result.message}`);
 		}
+		store.removed(profile, results.filter(r => r.ok).map(r => r.id));
+		store.settle(profile, results.filter(r => !r.ok).map(r => r.id));
+		return results;
 	}
 
 	const checkedProfile = async (profile: unknown): Promise<string> => {
@@ -544,7 +629,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		const stillWanted = new Set(desiredExtensions(next, profile).ids.map(lower));
 		const excluded = new Set((config.excludes?.[profile] ?? []).map(lower));
 		const cli = resolveCliOrThrow();
-		const plan = await planRemoval(cli, profile, (config.groups[group] ?? []).filter(id => !stillWanted.has(lower(id)) && !excluded.has(lower(id))));
+		const plan = await planRemoval(profile, (config.groups[group] ?? []).filter(id => !stillWanted.has(lower(id)) && !excluded.has(lower(id))));
 		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
 
 		if (plan.remove.length > 0 && args?.confirm !== false && !await ui.confirm(
@@ -555,8 +640,16 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			report.cancelled = true;
 			return report;
 		}
-		await saveGroups(file, next);
-		await uninstallAll(cli, profile, plan.remove, report);
+		store.removing(profile, plan.remove); // gone from the tree before anything is written or run
+		try {
+			await saveGroups(file, next);
+		} catch (error) {
+			store.settle(profile, plan.remove);
+			throw error;
+		}
+		for (const result of await uninstallFrom(cli, profile, plan.remove)) {
+			(result.ok ? report.uninstalled : report.failed).push(result.id);
+		}
 		const alsoAll = (config.profiles[ALL_PROFILES] ?? []).includes(group);
 		void vscode.window.showInformationMessage(`"${profile}" no longer follows "${group}"${alsoAll ? ', which still goes to all profiles' : ''}.`);
 		reported(profile, report);
@@ -573,7 +666,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		const { config, file } = await loadGroups();
 		const wanted = desiredExtensions(config, profile).ids.some(existing => lower(existing) === lower(id));
 		const cli = resolveCliOrThrow();
-		const plan = await planRemoval(cli, profile, [id]);
+		const plan = await planRemoval(profile, [id]);
 		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
 		const exclude = async () => saveGroups(file, excludeFromProfile((await loadGroups()).config, profile, id));
 
@@ -597,9 +690,15 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			report.cancelled = true;
 			return report;
 		}
-		await uninstallAll(cli, profile, plan.remove, report);
-		if (wanted && report.failed.length === 0) {
-			await exclude();
+		store.removing(profile, plan.remove); // gone from the tree now
+		if (wanted) {
+			await exclude(); // the group then shows it as removed from this profile at once
+		}
+		for (const result of await uninstallFrom(cli, profile, plan.remove)) {
+			(result.ok ? report.uninstalled : report.failed).push(result.id);
+		}
+		if (wanted && report.failed.length > 0) {
+			await forgetExclusions(profile, [id]); // it is still installed, so the profile still has it
 		}
 		reported(profile, report);
 		return report;
@@ -616,7 +715,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	/** Offers (or, for an explicit list, applies) the removal of extras. Never removes anything without a confirmation. */
 	async function review(cli: CliInvocation, profile: string, config: GroupsConfig, mode: UninstallMode, confirmExplicit: boolean, report: SyncReport): Promise<void> {
-		const extras = await findExtras(cli, profile, config);
+		const extras = await findExtras(profile, config);
 		report.extras = extras;
 
 		let chosen: string[];
@@ -654,16 +753,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			return;
 		}
 
-		const results: InstallResult[] = [];
-		await withProgress(`Uninstalling from "${profile}"…`, async () => {
-			for (const id of chosen) {
-				const result = await uninstallExtension(cli, run, id, profile);
-				if (!result.ok) {
-					log.error(`uninstall ${id} <- ${profile}: ${result.message}`);
-				}
-				results.push(result);
-			}
-		});
+		const results = await uninstallFrom(cli, profile, chosen);
 		report.uninstalled = results;
 
 		const failed = results.filter(r => !r.ok);
@@ -686,7 +776,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		const { config } = await loadGroups();
 		const cli = resolveCliOrThrow();
 
-		const installed = await withProgress(`Listing the extensions of "${profile}"…`, () => listExtensions(cli, run, profile));
+		const installed = await looking(`Looking at what "${profile}" has…`, () => store.list(profile, { maxAgeMs: 0 }));
 		const fullPlan = planSync(config, profile, installed.map(e => e.id));
 		// "only" is what the notification announced (the groups this workspace needs); an explicit sync installs all
 		const only = args?.only ? new Set(args.only.map(lower)) : undefined;
@@ -709,6 +799,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 				return { ...report, cancelled: true };
 			}
 
+			store.installing(profile, plan.toInstall); // shown now, marked, while the command line works
 			report.results = await withProgress(`Installing into "${profile}"…`, async () => {
 				const done: InstallResult[] = [];
 				for (const id of plan.toInstall) {
@@ -716,6 +807,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 					if (!result.ok) {
 						log.error(`${id} -> ${profile}: ${result.message}`);
 					}
+					result.ok ? store.added(profile, [id]) : store.settle(profile, [id]);
 					done.push(result);
 				}
 				return done;
@@ -845,13 +937,13 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			logged('better-profiles.extensionInstallInProfiles', extensionInstallInProfiles),
 			logged('better-profiles.removeGroupFromProfile', removeGroupFromProfile),
 			logged('better-profiles.removeExtensionFromProfile', removeExtensionFromProfile),
-			profileExtensionsChanged,
+			{ dispose: () => { clearTimeout(redrawTimer); watchers.forEach(watcher => watcher.close()); watchers.clear(); } },
 		],
 		checkSync,
 		resetPrompts,
 		groupsFilePath,
 		groupedExtensions: () => grouped,
 		refreshGroupedContext,
-		core: { loadGroups, saveGroups, profileNames, profiles: () => api.getProfiles(), resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event, onDidChangeProfileExtensions: profileExtensionsChanged.event, forgetExclusions },
+		core: { loadGroups, saveGroups, profileNames, profiles: () => api.getProfiles(), resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event, store, forgetExclusions },
 	};
 }

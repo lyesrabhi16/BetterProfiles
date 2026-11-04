@@ -213,6 +213,12 @@
           "default": "",
           "scope": "application",
           "markdownDescription": "Advanced. The folder where VS Code keeps the installed extensions (for example `~/.vscode/extensions`). It is used to read each extension's name and icon for the Better Profiles tab, and to run VS Code's command line against the right installation. Leave empty to find it from the extensions that are installed."
+        },
+        "betterProfiles.listFromFiles": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "Read the list of extensions of each profile from the files VS Code keeps (instant, and noticed when something else changes them) instead of starting VS Code's command line for every list. Turn it off to always use the command line. The command line is also used whenever those files cannot be read."
         }
       }
     },

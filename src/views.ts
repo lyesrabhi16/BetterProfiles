@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import type { PromptUi, TreeViewHandles } from './api';
 import { ExtensionCatalog, ExtensionInfo } from './catalog';
-import { CliInvocation, InstalledExtension, Runner, installExtension, listExtensions } from './cli';
+import { CliInvocation, Runner, installExtension } from './cli';
+import type { ProfileStore } from './profileStore';
 import { DragSource, DropOperation, DropTarget, planDrop } from './dnd';
 import { Profile, profileIcon } from './profiles';
 import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profileLayout, profilesFollowing, removeFromGroup, removeGroup, unassignGroup } from './groups';
@@ -18,8 +19,8 @@ export interface ViewsCore {
 	/** Where the installed extensions are, to read their names and icons from. */
 	extensionsDir(): string | undefined;
 	onDidChangeGroups: vscode.Event<void>;
-	/** A profile's list of extensions changed behind the tree's back (something was uninstalled from it). */
-	onDidChangeProfileExtensions: vscode.Event<{ profile: string; removed: string[] }>;
+	/** What each profile has, and what is being installed into it or removed from it right now. */
+	store: ProfileStore;
 	/** An extension installed on purpose is wanted again: lifts the profile's exclusion of it. */
 	forgetExclusions(profile: string, ids: readonly string[]): Promise<void>;
 	currentProfileName(): Promise<string | undefined>;
@@ -31,8 +32,8 @@ export type Node =
 	| { kind: 'groupExtension'; group: string; id: string }
 	| { kind: 'profile'; name: string }
 	| { kind: 'profileGroup'; profile: string; name: string }
-	| { kind: 'profileGroupExtension'; profile: string; group: string; id: string; version?: string }
-	| { kind: 'profileExtension'; profile: string; id: string; version?: string }
+	| { kind: 'profileGroupExtension'; profile: string; group: string; id: string; version?: string; folder?: string; installing?: boolean }
+	| { kind: 'profileExtension'; profile: string; id: string; version?: string; folder?: string; installing?: boolean }
 	| { kind: 'message'; text: string };
 
 const GROUPS_VIEW = 'betterProfiles.groups';
@@ -43,11 +44,12 @@ const SOURCES_MIME = 'application/vnd.better-profiles.sources';
 
 /** An extension as VS Code's Extensions list shows it: its icon image and its display name; the id when it is not found. */
 function extensionItem(id: string, info: ExtensionInfo | undefined, node: ExtensionNode): vscode.TreeItem {
+	const busy = 'installing' in node && node.installing === true;
 	const item = new vscode.TreeItem(info?.name ?? id, vscode.TreeItemCollapsibleState.None);
-	item.contextValue = node.kind;
+	item.contextValue = busy ? `${node.kind}Busy` : node.kind; // nothing to do with it until it is in
 	// a click runs this; two clicks in a row on the same item open the page (see better-profiles.view.clickExtension)
 	item.command = { command: 'better-profiles.view.clickExtension', title: 'Open Extension Page', arguments: [node] };
-	item.iconPath = info?.iconPath ? vscode.Uri.file(info.iconPath) : new vscode.ThemeIcon('extensions');
+	item.iconPath = busy ? new vscode.ThemeIcon('loading~spin') : info?.iconPath ? vscode.Uri.file(info.iconPath) : new vscode.ThemeIcon('extensions');
 	item.tooltip = info
 		? [info.name, `${id}${info.version ? ` v${info.version}` : ''}`, ...(info.description ? [info.description] : [])].join('\n')
 		: id;
@@ -63,9 +65,11 @@ class GroupsProvider implements vscode.TreeDataProvider<Node> {
 	readonly onDidChangeTreeData = this.changed.event;
 
 	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) {
-		core.onDidChangeGroups(() => this.refresh());
+		// a change to the groups does not change what is installed: nothing needs to be read from the extensions folder again
+		core.onDidChangeGroups(() => this.changed.fire());
 	}
 
+	/** The Refresh button: look at the extensions folder again too. */
 	refresh(): void {
 		this.catalog.clear();
 		this.changed.fire();
@@ -115,50 +119,18 @@ class GroupsProvider implements vscode.TreeDataProvider<Node> {
 class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 	private readonly changed = new vscode.EventEmitter<Node | undefined | void>();
 	readonly onDidChangeTreeData = this.changed.event;
-	private cache = new Map<string, Promise<InstalledExtension[]>>();
 
 	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) {
-		// the groups decide how a profile's extensions are laid out; what each profile has is unchanged, so its lists are kept
+		// The whole tree is redrawn, never one item: VS Code only knows the item objects it was given, and a new object for
+		// a profile is ignored (it would leave the old list on screen). Open profiles stay open.
 		core.onDidChangeGroups(() => this.changed.fire());
-		core.onDidChangeProfileExtensions(({ profile, removed }) => this.dropFromList(profile, removed));
+		core.store.onDidChange(() => this.changed.fire());
 	}
 
-	/** Forgets every list and reads them again when a profile is next opened. */
+	/** The Refresh button: forget every list, and look at the extensions folder again. */
 	refresh(): void {
-		this.cache.clear();
 		this.catalog.clear();
-		this.changed.fire();
-	}
-
-	/** Takes what was uninstalled out of the list the tree already has, instead of asking the command line again. */
-	dropFromList(profile: string, removed: readonly string[]): void {
-		const gone = new Set(removed.map(id => id.toLowerCase()));
-		const known = this.cache.get(profile);
-		if (known) {
-			const next = known.then(list => list.filter(e => !gone.has(e.id.toLowerCase())));
-			this.cache.set(profile, next);
-			next.catch(() => this.cache.delete(profile));
-		}
-		this.catalog.clear();
-		this.changed.fire();
-	}
-
-	invalidate(profile: string): void {
-		this.cache.delete(profile);
-		this.catalog.clear(); // an install adds a folder
-		// The whole tree: VS Code only knows the item objects it was given, and a new object for the profile is ignored
-		// (it would leave the old list on screen). Open profiles stay open, so nothing is lost by redrawing all of it.
-		this.changed.fire();
-	}
-
-	private extensionsOf(profile: string): Promise<InstalledExtension[]> {
-		let pending = this.cache.get(profile);
-		if (!pending) {
-			pending = listExtensions(this.core.resolveCli(), this.core.run, profile);
-			this.cache.set(profile, pending);
-			pending.catch(() => this.cache.delete(profile)); // so that a retry asks again
-		}
-		return pending;
+		this.core.store.invalidate();
 	}
 
 	async getChildren(node?: Node): Promise<Node[]> {
@@ -170,16 +142,17 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 		}
 		const profile = node.kind === 'profile' ? node.name : node.profile;
 		try {
-			const extensions = await this.extensionsOf(profile);
-			const versions = new Map(extensions.map(e => [e.id, e.version]));
-			const layout = profileLayout(await this.groupsConfig(), profile, extensions.map(e => e.id));
+			const entries = await this.core.store.entries(profile);
+			const byId = new Map(entries.map(e => [e.id, e]));
+			const extension = (id: string) => ({ id, version: byId.get(id)?.version, folder: byId.get(id)?.folder, ...(byId.get(id)?.installing ? { installing: true } : {}) });
+			const layout = profileLayout(await this.groupsConfig(), profile, entries.map(e => e.id));
 			if (node.kind === 'profileGroup') {
 				const group = layout.groups.find(candidate => candidate.name === node.name);
-				return (group?.installed ?? []).map(id => ({ kind: 'profileGroupExtension', profile, group: node.name, id, version: versions.get(id) }));
+				return (group?.installed ?? []).map((id): Node => ({ kind: 'profileGroupExtension', profile, group: node.name, ...extension(id) }));
 			}
 			return [
 				...layout.groups.map((group): Node => ({ kind: 'profileGroup', profile, name: group.name })),
-				...layout.others.map((id): Node => ({ kind: 'profileExtension', profile, id, version: versions.get(id) })),
+				...layout.others.map((id): Node => ({ kind: 'profileExtension', profile, ...extension(id) })),
 			];
 		} catch (error) {
 			return [message(errorText(error))];
@@ -207,7 +180,7 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 				return item;
 			}
 			case 'profileGroup': {
-				const layout = profileLayout(await this.groupsConfig(), node.profile, (await this.extensionsOf(node.profile)).map(e => e.id));
+				const layout = profileLayout(await this.groupsConfig(), node.profile, (await this.core.store.entries(node.profile)).map(e => e.id));
 				const group = layout.groups.find(candidate => candidate.name === node.name);
 				const have = group?.installed.length ?? 0;
 				const total = group?.total ?? 0;
@@ -226,8 +199,8 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 			}
 			case 'profileGroupExtension':
 			case 'profileExtension': {
-				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version), node);
-				item.description = node.version;
+				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version, node.folder), node);
+				item.description = node.installing ? 'installing…' : node.version;
 				return item;
 			}
 			default:
@@ -305,22 +278,31 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 		vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task);
 
 	async function installInto(profile: string, ids: string[]): Promise<void> {
+		const wanted = [...new Map(ids.map(id => [id.toLowerCase(), id])).values()];
 		const cli = core.resolveCli();
-		const results = await withProgress(`Installing into "${profile}"…`, async () => {
-			const have = new Set((await listExtensions(cli, core.run, profile)).map(e => e.id.toLowerCase()));
-			const done: { id: string; ok: boolean; message: string }[] = [];
-			for (const id of ids.filter(candidate => !have.has(candidate.toLowerCase()))) {
-				const result = await installExtension(cli, core.run, id, profile);
-				if (!result.ok) {
-					log.error(`${id} -> ${profile}: ${result.message}`);
+		core.store.installing(profile, wanted); // in the tree before anything is read or run
+		await core.forgetExclusions(profile, wanted); // wanted again, installed already or not
+		let results: { id: string; ok: boolean; message: string }[] = [];
+		try {
+			const have = new Set((await core.store.list(profile, { maxAgeMs: 0 })).map(e => e.id.toLowerCase()));
+			core.store.settle(profile, wanted.filter(id => have.has(id.toLowerCase()))); // those are in already
+			results = await withProgress(`Installing into "${profile}"…`, async () => {
+				const done: { id: string; ok: boolean; message: string }[] = [];
+				for (const id of wanted.filter(candidate => !have.has(candidate.toLowerCase()))) {
+					const result = await installExtension(cli, core.run, id, profile);
+					if (!result.ok) {
+						log.error(`${id} -> ${profile}: ${result.message}`);
+					}
+					result.ok ? core.store.added(profile, [id]) : core.store.settle(profile, [id]);
+					done.push(result);
 				}
-				done.push(result);
-			}
-			return done;
-		});
-		profiles.invalidate(profile);
+				return done;
+			});
+		} finally {
+			core.store.settle(profile, wanted);
+		}
+		void core.store.reload(profile); // for the versions, without anyone waiting
 		const failed = results.filter(r => !r.ok);
-		await core.forgetExclusions(profile, ids.filter(id => !failed.some(f => f.id.toLowerCase() === id.toLowerCase()))); // wanted again, installed already or not
 		if (results.length === 0) {
 			void vscode.window.showInformationMessage(`"${profile}" already has ${ids.length === 1 ? 'it' : 'all of them'}.`);
 		} else if (failed.length === 0) {

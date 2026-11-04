@@ -8,6 +8,16 @@ All notable changes to the "better-profiles" extension are documented here.
 
 - The extension's settings are now application-scoped (shared by all profiles, still impossible to set from a
   workspace). They were machine-scoped, which is still per profile.
+- Actions in the Better Profiles tab are instant: a removal takes the extension out of the tree, and an install shows it (marked
+  "installing…"), before the command line has done anything; what could not be done comes back with a message. Confirmation
+  questions appear at once. Measured in a real VS Code: the question after 44 ms (was 514 ms), the extension gone 84 ms after
+  confirming, and an installed extension shown 30 ms after the drop.
+- The extensions of a profile are read from the `extensions.json` VS Code keeps for it, a few milliseconds instead of a start of the
+  command line, and re-read only when the file changed. The tree redraws when something else changes one. The command line is the
+  fallback (a missing or unreadable file) and `betterProfiles.listFromFiles` turns the files off.
+- The extension catalog is incremental: what was read of an extension is kept (checked by one look at its `package.json`), so changes
+  to the groups no longer read every extension again.
+- The sync's cleanup uninstalls everything it was told to in one run of the command line, and shows the result at once.
 
 ### Fixed
 

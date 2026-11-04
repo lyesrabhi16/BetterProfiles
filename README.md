@@ -58,6 +58,7 @@ That file is internal and undocumented, so a future VS Code release could change
 | `betterProfiles.autoSync` | `ask` | `off`, `ask` or `auto`: what to do when the current profile lacks extensions of its groups. See [Staying in sync](#staying-in-sync). |
 | `betterProfiles.keepExtensions` | `[]` | Extension ids that are never offered for uninstalling. |
 | `betterProfiles.extensionsDir` | empty | Advanced. The folder where VS Code keeps installed extensions, to read their names and icons. Empty means it is found from the extensions that are installed. |
+| `betterProfiles.listFromFiles` | `true` | Read each profile's list of extensions from the files VS Code keeps instead of starting its command line for every list. See [Speed](#speed). |
 | `betterProfiles.codeCommand` | empty | Advanced. Run this executable instead of VS Code's own command line to list and install extensions. |
 | `betterProfiles.codeArgs` | `[]` | Advanced. Arguments that always come first for `codeCommand`, for example `--user-data-dir` and `--extensions-dir`. |
 
@@ -185,6 +186,25 @@ A menu entry's label is fixed text in VS Code, so group names cannot be written 
 They show for installed extensions that are not built into VS Code. "[Better Profiles] Install in Other Profiles" asks the command line
 about every profile first, so an extension that every profile already has (application scoped) gets a message and
 nothing else.
+
+### Speed
+
+Starting VS Code's command line costs a few hundred milliseconds each time, so the tab avoids it where it can:
+
+- **Lists come from VS Code's own files.** Each profile has an `extensions.json` (the default profile's is in the extensions folder, the
+  others under `User/profiles/<id>/` in the user data folder). Reading one takes a few milliseconds, and a file is read again only when its
+  size or time changed, as git does with its index. A watcher notices when something else changes one (the Extensions view, another
+  window) and the tree redraws without a Refresh. If a file is missing, cannot be understood, or the profile has no folder, the command
+  line is used instead; `betterProfiles.listFromFiles` turns the files off altogether. I checked that the files and the command line
+  agree on a real VS Code, but the file format is VS Code's own and may change: the fallback is there for that.
+- **Extension names and icons are read once.** An extension's folder name has its version in it, so what was read is kept and checked
+  with one look at its `package.json`; changing the groups no longer reads every extension again, and the files name each extension's
+  folder, so nothing is searched for.
+- **What you do shows first.** A removal takes the extension out of the tree at once and an install puts it there at once, marked
+  "installing…", while the command line works in the background; what it could not do comes back. The questions are built from the lists
+  above, so they appear immediately, and several extensions are uninstalled in one run of the command line. Right before anything is
+  uninstalled, the lists of all profiles are read again (a few milliseconds from the files) so the rule that nothing installed in every
+  profile is removed is checked on current data.
 
 ### Staying in sync
 

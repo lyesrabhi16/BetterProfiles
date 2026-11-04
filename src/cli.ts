@@ -80,6 +80,12 @@ export function userDataDirFromGlobalStorage(globalStoragePath: string): string 
 	return path.dirname(path.dirname(path.dirname(globalStoragePath)));
 }
 
+/** storage.json lives in <user data folder>/User/globalStorage: where that folder is, or undefined for a file kept elsewhere. */
+export function userDataDirFromStorageFile(storageFile: string): string | undefined {
+	const normalised = storageFile.replace(/\\/g, '/');
+	return normalised.endsWith('/User/globalStorage/storage.json') ? path.dirname(path.dirname(path.dirname(storageFile))) : undefined;
+}
+
 /** The folder most installed extensions live in, or undefined when there is nothing to go on. */
 export function pickExtensionsDir(extensionPaths: string[]): string | undefined {
 	const counts = new Map<string, number>();
