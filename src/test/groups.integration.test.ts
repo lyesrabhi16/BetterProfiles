@@ -1923,6 +1923,25 @@ suite('Extension groups against a fake CLI', () => {
 					assert.ok(!('Python' in readGroups().profiles), 'the profile still stops following the group');
 				});
 
+				test('the tree is told to redraw as a whole afterwards: VS Code ignores a refresh of an item object it does not know', async () => {
+					answer({ confirm: () => true });
+					const payloads: unknown[] = [];
+					const subscription = provider('profiles').onDidChangeTreeData?.(payload => payloads.push(payload));
+					await removeGroup();
+					subscription?.dispose();
+					assert.ok(payloads.length > 0);
+					assert.ok(payloads.every(payload => payload === undefined), JSON.stringify(payloads));
+				});
+
+				test('the same after something is installed into a profile by a drop', async () => {
+					const payloads: unknown[] = [];
+					const subscription = provider('profiles').onDidChangeTreeData?.(payload => payloads.push(payload));
+					await drop('profiles', profile('Agents'), await drag('groups', [groupExt('web', 'a.b')]));
+					subscription?.dispose();
+					assert.ok(payloads.length > 0);
+					assert.ok(payloads.every(payload => payload === undefined), JSON.stringify(payloads));
+				});
+
 				test('the Profiles tree shows the result at once', async () => {
 					answer({ confirm: () => true });
 					await children('profiles', profile('Python'));
