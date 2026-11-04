@@ -2007,12 +2007,28 @@ suite('Extension groups against a fake CLI', () => {
 					assert.ok(installs().some(args => args.includes('x.y')), 'what the profile does want is still installed');
 				});
 
-				test('the Profiles tree no longer counts it as part of the group of that profile', async () => {
+				test('the Profiles tree still counts it in the group: the group has two, the profile has one', async () => {
 					answer({ confirm: () => true });
 					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
 					const web = await item('profiles', profileGroup('Python', 'web'));
-					assert.ok(String(web.description).includes('1 of 1'), String(web.description));
-					assert.deepStrictEqual((await children('profiles', profileGroup('Python', 'web'))).map(n => n.id), ['c.d']);
+					assert.ok(String(web.description).includes('1 of 2 installed'), String(web.description));
+					assert.deepStrictEqual((await children('profiles', profileGroup('Python', 'web'))).map(n => n.id), ['c.d'], 'only what is installed is listed');
+				});
+
+				test('its tooltip says it was removed from this profile, and that it is not something to install', async () => {
+					answer({ confirm: () => true });
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					const tip = String((await item('profiles', profileGroup('Python', 'web'))).tooltip);
+					assert.ok(tip.includes('Removed from Python') && tip.includes('a.b'), tip);
+					assert.ok(!/lacks a\.b|Sync the profile/i.test(tip), 'a sync would not install it: ' + tip);
+				});
+
+				test('what the profile lacks and still wants is told apart from what it removed', async () => {
+					writeState({ Default: [], Python: ['p.installed'], Agents: [] });
+					answer({});
+					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
+					const tip = String((await item('profiles', profileGroup('Python', 'web'))).tooltip);
+					assert.ok(tip.includes('lacks c.d') && tip.includes('Removed from Python: a.b'), tip);
 				});
 
 				test('installing it into the profile again lifts the exclusion', async () => {

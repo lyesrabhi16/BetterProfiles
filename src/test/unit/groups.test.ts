@@ -740,25 +740,34 @@ suite('profileLayout with exclusions', () => {
 		excludes: { P: ['c.d'] },
 	};
 
-	test('an excluded extension is no longer part of the group for that profile', () => {
-		const layout = profileLayout(c, 'P', ['a.b']);
-		assert.strictEqual(layout.groups[0].total, 2);
-		assert.deepStrictEqual(layout.groups[0].missing, ['e.f']);
+	test('an excluded extension still counts as one of the extensions of the group, so "2 of 3" tells the truth', () => {
+		const layout = profileLayout(c, 'P', ['a.b', 'e.f']);
+		assert.strictEqual(layout.groups[0].total, 3);
+		assert.deepStrictEqual(layout.groups[0].installed, ['a.b', 'e.f']);
+		assert.deepStrictEqual(layout.groups[0].excluded, ['c.d']);
 	});
 
-	test('one that is still installed shows among the other extensions, not in the group', () => {
-		const layout = profileLayout(c, 'P', ['a.b', 'c.d']);
-		assert.deepStrictEqual(layout.groups[0].installed, ['a.b']);
-		assert.deepStrictEqual(layout.others, ['c.d']);
-	});
-
-	test('the group lists what the profile lacks', () => {
-		assert.deepStrictEqual(profileLayout(c, 'P', []).groups[0].missing, ['a.b', 'e.f']);
+	test('but it is not missing: a sync would not install it', () => {
 		assert.deepStrictEqual(profileLayout(c, 'P', ['a.b', 'e.f']).groups[0].missing, []);
+		assert.deepStrictEqual(profileLayout(c, 'P', ['a.b']).groups[0].missing, ['e.f']);
+	});
+
+	test('one that is excluded but still installed stays in its group, not among the other extensions', () => {
+		const layout = profileLayout(c, 'P', ['a.b', 'c.d']);
+		assert.deepStrictEqual(layout.groups[0].installed, ['a.b', 'c.d']);
+		assert.deepStrictEqual(layout.others, []);
+	});
+
+	test('the group lists what the profile lacks and does not want', () => {
+		const layout = profileLayout(c, 'P', []);
+		assert.deepStrictEqual(layout.groups[0].missing, ['a.b', 'e.f']);
+		assert.deepStrictEqual(layout.groups[0].excluded, ['c.d']);
 	});
 
 	test('other profiles are not affected', () => {
 		const other: GroupsConfig = { ...c, profiles: { P: ['web'], Q: ['web'] } };
 		assert.strictEqual(profileLayout(other, 'Q', []).groups[0].total, 3);
+		assert.deepStrictEqual(profileLayout(other, 'Q', []).groups[0].excluded, []);
+		assert.deepStrictEqual(profileLayout(other, 'Q', []).groups[0].missing, ['a.b', 'c.d', 'e.f']);
 	});
 });
