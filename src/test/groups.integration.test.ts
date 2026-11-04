@@ -1448,6 +1448,143 @@ suite('Extension groups against a fake CLI', () => {
 			});
 		});
 
+		suite('the graph view', () => {
+			const GRAPH_COMMAND = 'better-profiles.showGraph';
+			const edges = () => (api.graph.state()?.graph.edges ?? []).map(e => `${e.from}>${e.to}${e.all ? '*' : ''}`).sort();
+			const nodes = (kind: string) => (api.graph.state()?.graph.nodes ?? []).filter(n => n.kind === kind);
+			const FIXTURE = path.resolve(__dirname, '../../test-fixtures/extensions');
+
+			setup(() => api.graph.close());
+			teardown(() => api.graph.close());
+
+			test('a command opens it, and it is in the Command Palette', async () => {
+				const manifest = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
+				assert.ok((manifest.commands as { command: string }[]).some(c => c.command === GRAPH_COMMAND), 'declared');
+				assert.ok((await vscode.commands.getCommands(true)).includes(GRAPH_COMMAND), 'registered');
+				assert.ok(!(manifest.menus.commandPalette as { command: string }[]).some(c => c.command === GRAPH_COMMAND), 'not hidden from the palette');
+			});
+
+			test('a button at the top of both trees opens it', () => {
+				const manifest = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
+				const entry = (manifest.menus['view/title'] as { command: string; when: string; group: string }[]).find(e => e.command === GRAPH_COMMAND);
+				assert.ok(entry, 'a view/title entry');
+				assert.ok(entry.when.includes('betterProfiles.groups') && entry.when.includes('betterProfiles.profiles'), entry.when);
+				assert.ok(entry.group.startsWith('navigation'), 'shown as a button, not in the overflow menu: ' + entry.group);
+				assert.ok((manifest.commands as { command: string; icon?: string }[]).find(c => c.command === GRAPH_COMMAND)?.icon, 'a button needs an icon');
+			});
+
+			test('it is closed until it is asked for', () => {
+				assert.strictEqual(api.graph.isOpen(), false);
+				assert.strictEqual(api.graph.state(), undefined);
+			});
+
+			test('it shows every extension of a group, every group and every profile', async () => {
+				await exec(GRAPH_COMMAND);
+				assert.strictEqual(api.graph.isOpen(), true);
+				assert.deepStrictEqual(nodes('extension').map(n => n.extensionId).sort(), ['a.b', 'c.d', 'x.y']);
+				assert.deepStrictEqual(nodes('group').map(n => n.label), ['web', 'tools', 'empty']);
+				assert.deepStrictEqual(nodes('profile').map(n => n.label), ['Default', 'Python', 'Agents']);
+			});
+
+			test('it links extensions to their groups and groups to the profiles that follow them', async () => {
+				await exec(GRAPH_COMMAND);
+				assert.deepStrictEqual(edges(), [
+					'extension:a.b>group:web', 'extension:c.d>group:web', 'extension:x.y>group:tools',
+					'group:tools>profile:Agents*', 'group:tools>profile:Default*', 'group:tools>profile:Python*',
+					'group:web>profile:Python',
+				]);
+			});
+
+			test('the profile of this window is marked', async () => {
+				await exec(GRAPH_COMMAND);
+				assert.deepStrictEqual(nodes('profile').filter(n => n.current).map(n => n.label), ['Python']);
+			});
+
+			test('asking again shows the same one instead of opening another', async () => {
+				await exec(GRAPH_COMMAND);
+				await exec(GRAPH_COMMAND);
+				assert.strictEqual(api.graph.opened(), 1);
+			});
+
+			test('it can be opened again after it was closed', async () => {
+				await exec(GRAPH_COMMAND);
+				api.graph.close();
+				assert.strictEqual(api.graph.isOpen(), false);
+				await exec(GRAPH_COMMAND);
+				assert.strictEqual(api.graph.isOpen(), true);
+				assert.strictEqual(api.graph.opened(), 2);
+			});
+
+			test('it follows changes to the groups while it is open', async () => {
+				await exec(GRAPH_COMMAND);
+				await exec('better-profiles.addToGroup', { group: 'empty', extensions: ['z.new'] });
+				assert.ok(await until(() => edges().includes('extension:z.new>group:empty')), 'the new extension should appear');
+				await exec('better-profiles.assignGroup', { profile: 'Agents', group: 'web' });
+				assert.ok(await until(() => edges().includes('group:web>profile:Agents')), 'the new link should appear');
+			});
+
+			test('it names extensions as the Extensions view does, with their icon', async () => {
+				await set('extensionsDir', FIXTURE);
+				writeGroups({ groups: { web: ['aaron-bond.better-comments', 'not.installed'] }, profiles: { Python: ['web'] } });
+				await exec(GRAPH_COMMAND);
+				const known = nodes('extension').find(n => n.extensionId === 'aaron-bond.better-comments');
+				assert.strictEqual(known?.label, 'Better Comments');
+				assert.ok(String(known?.icon).includes('icon.png'), String(known?.icon));
+				const unknown = nodes('extension').find(n => n.extensionId === 'not.installed');
+				assert.strictEqual(unknown?.label, 'not.installed');
+				assert.strictEqual(unknown?.icon, undefined);
+			});
+
+			test('a groups file that cannot be read gives an empty graph and says why', async () => {
+				fs.writeFileSync(groupsFile, '{ broken');
+				await exec(GRAPH_COMMAND);
+				assert.ok(api.graph.state()?.error, 'the page needs the reason');
+				assert.deepStrictEqual(nodes('extension'), []);
+				assert.deepStrictEqual(nodes('group'), []);
+			});
+
+			test('it can be refreshed from the page', async () => {
+				await exec(GRAPH_COMMAND);
+				const before = api.graph.sent();
+				await api.graph.receive({ type: 'refresh' });
+				assert.ok(api.graph.sent() > before);
+			});
+
+			test('it sends its data again when the page says it is ready', async () => {
+				await exec(GRAPH_COMMAND);
+				const before = api.graph.sent();
+				await api.graph.receive({ type: 'ready' });
+				assert.ok(api.graph.sent() > before);
+			});
+
+			test('a click on an extension in the page opens that extension\'s page', async () => {
+				answer({});
+				await exec(GRAPH_COMMAND);
+				await api.graph.receive({ type: 'openExtension', id: 'a.b' });
+				assert.deepStrictEqual(seen.opened, ['a.b']);
+			});
+
+			test('whatever else the page sends is ignored: bad ids, other messages, other shapes', async () => {
+				answer({});
+				await exec(GRAPH_COMMAND);
+				for (const message of [
+					{ type: 'openExtension', id: '--uninstall-extension' }, { type: 'openExtension', id: '../x.vsix' }, { type: 'openExtension', id: 5 },
+					{ type: 'openExtension' }, { type: 'install', id: 'a.b' }, { id: 'a.b' }, 'openExtension', 42, null, undefined, [],
+				]) {
+					await api.graph.receive(message);
+				}
+				assert.deepStrictEqual(seen.opened, []);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('changes while it is closed do not fail', async () => {
+				await exec(GRAPH_COMMAND);
+				api.graph.close();
+				await exec('better-profiles.addToGroup', { group: 'web', extensions: ['q.late'] });
+				assert.strictEqual(api.graph.isOpen(), false);
+			});
+		});
+
 		suite('how extensions are shown', () => {
 			const FIXTURE = path.resolve(__dirname, '../../test-fixtures/extensions');
 			const forget = () => { api.views.groups.refresh(); api.views.profiles.refresh(); };
