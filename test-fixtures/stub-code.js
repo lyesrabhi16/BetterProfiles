@@ -38,19 +38,25 @@ if (!(profile in state)) {
 	console.log(`Installing extensions...\nExtension '${id}' v1.0.0 was successfully installed.`);
 } else if (args.includes('--uninstall-extension')) {
 	waitForAction();
-	let failed = false;
+	// like the real CLI: one after the other, and it STOPS at the first one it cannot do.
+	// STUB_DEPENDANTS: { "<id>": ["<id of an extension that needs it>", ...] }, an extension cannot go while one of those is installed
+	const dependants = JSON.parse(process.env.STUB_DEPENDANTS || '{}');
 	for (const id of all('--uninstall-extension')) {
+		console.log(`Uninstalling ${id}...`);
 		const at = state[profile].findIndex(existing => existing.toLowerCase() === id.toLowerCase());
+		const blocker = (dependants[id] ?? []).find(other => state[profile].some(existing => existing.toLowerCase() === other.toLowerCase()));
+		if (blocker) {
+			console.error(`Cannot uninstall '${id}' extension. '${blocker}' extension depends on this.`);
+			process.exit(1);
+		}
 		if (id.startsWith('fail.') || at < 0) {
 			console.error(`Extension '${id}' is not installed.`);
-			failed = true;
-			continue;
+			process.exit(1);
 		}
 		state[profile].splice(at, 1);
 		fs.writeFileSync(process.env.STUB_STATE, JSON.stringify(state));
-		console.log(`Uninstalling ${id}...\nExtension '${id}' was successfully uninstalled!`);
+		console.log(`Extension '${id}' was successfully uninstalled!`);
 	}
-	process.exit(failed ? 1 : 0);
 } else {
 	process.exit(2);
 }

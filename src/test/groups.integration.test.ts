@@ -2421,6 +2421,37 @@ suite('Extension groups against a fake CLI', () => {
 					assert.ok(payloads.every(payload => payload === undefined), JSON.stringify(payloads));
 				});
 
+				test('an extension that others in the group depend on is removed after them: nothing is blocked, nothing is left', async () => {
+					process.env.STUB_DEPENDANTS = JSON.stringify({ 'lang.base': ['lang.test', 'lang.debug'] });
+					try {
+						writeGroups({ groups: { java: ['lang.base', 'lang.test', 'lang.debug', 'go.lang'] }, profiles: { Python: ['java'] } });
+						writeState({ Default: [], Python: ['lang.base', 'lang.test', 'lang.debug', 'go.lang', 'p.installed'], Agents: [] });
+						answer({ confirm: () => true });
+						const report = await removeGroup('java');
+						assert.deepStrictEqual(report.failed, []);
+						assert.deepStrictEqual(report.uninstalled.sort(), ['go.lang', 'lang.base', 'lang.debug', 'lang.test']);
+						assert.deepStrictEqual(readState().Python, ['p.installed']);
+						assert.strictEqual(uninstalls().length, 2, 'the first run stops at lang.base, the second has it last');
+					} finally {
+						delete process.env.STUB_DEPENDANTS;
+					}
+				});
+
+				test('what really cannot go is reported with the reason, and the extensions around it still go', async () => {
+					process.env.STUB_DEPENDANTS = JSON.stringify({ 'lang.base': ['outside.user'] });
+					try {
+						writeGroups({ groups: { java: ['lang.base', 'go.lang'] }, profiles: { Python: ['java'] } });
+						writeState({ Default: [], Python: ['lang.base', 'go.lang', 'outside.user'], Agents: [] });
+						answer({ confirm: () => true });
+						const report = await removeGroup('java');
+						assert.deepStrictEqual(report.failed, ['lang.base']);
+						assert.deepStrictEqual(report.uninstalled, ['go.lang']);
+						assert.deepStrictEqual(readState().Python, ['lang.base', 'outside.user']);
+					} finally {
+						delete process.env.STUB_DEPENDANTS;
+					}
+				});
+
 				test('the Profiles tree shows the result at once', async () => {
 					answer({ confirm: () => true });
 					await children('profiles', profile('Python'));

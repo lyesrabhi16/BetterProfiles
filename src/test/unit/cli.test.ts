@@ -306,3 +306,85 @@ suite('userDataDirFromStorageFile', () => {
 		assert.strictEqual(userDataDirFromStorageFile(''), undefined);
 	});
 });
+
+/**
+ * A CLI that behaves like the real one when given several --uninstall-extension: one after the other, and it STOPS at the
+ * first one it cannot do. \`dependants\` says which extensions need which (an extension cannot go while one of those is there).
+ */
+function realisticCli(installed: string[], dependants: Record<string, string[]> = {}, alwaysFail: string[] = []) {
+	const have = new Set(installed.map(id => id.toLowerCase()));
+	const launches: string[][] = [];
+	const run: Runner = async (_command, args) => {
+		const ids = args.flatMap((arg, i) => (arg === '--uninstall-extension' ? [args[i + 1]] : []));
+		launches.push(ids);
+		let stdout = '';
+		for (const id of ids) {
+			stdout += `Uninstalling ${id}...\n`;
+			const blocker = (dependants[id.toLowerCase()] ?? []).find(other => have.has(other.toLowerCase()));
+			if (alwaysFail.includes(id) || blocker) {
+				const stderr = blocker ? `Cannot uninstall '${id}' extension. '${blocker}' extension depends on this.\n` : `Extension '${id}' cannot be uninstalled.\n`;
+				return { code: 1, stdout, stderr };
+			}
+			have.delete(id.toLowerCase());
+			stdout += `Extension '${id}' was successfully uninstalled!\n`;
+		}
+		return { code: 0, stdout, stderr: '' };
+	};
+	return { run, launches, left: () => [...have].sort() };
+}
+
+suite('uninstallExtensions when the CLI stops at the first extension it cannot remove', () => {
+	test('a blocked extension is tried again after the others, when whatever blocked it is gone', async () => {
+		const sim = realisticCli(['base.ext', 'other.ext', 'dependant.ext'], { 'base.ext': ['dependant.ext'] });
+		const results = await uninstallExtensions(cli, sim.run, ['base.ext', 'other.ext', 'dependant.ext'], 'P');
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['base.ext', true], ['other.ext', true], ['dependant.ext', true]]);
+		assert.deepStrictEqual(sim.left(), []);
+		assert.strictEqual(sim.launches.length, 2, 'the whole list, then the same without the blocked one first');
+		assert.deepStrictEqual(sim.launches[1], ['other.ext', 'dependant.ext', 'base.ext']);
+	});
+
+	test('one that cannot be removed at all does not stop the others, and says why', async () => {
+		const sim = realisticCli(['bad.ext', 'a.b', 'c.d'], {}, ['bad.ext']);
+		const results = await uninstallExtensions(cli, sim.run, ['bad.ext', 'a.b', 'c.d']);
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['bad.ext', false], ['a.b', true], ['c.d', true]]);
+		assert.deepStrictEqual(sim.left(), ['bad.ext']);
+		assert.ok(results[0].message.includes('cannot be uninstalled'), results[0].message);
+	});
+
+	test('the reason is the CLI\'s error, never its progress line', async () => {
+		const sim = realisticCli(['base.ext', 'dependant.ext'], { 'base.ext': ['dependant.ext'], 'dependant.ext': ['base.ext'] });
+		const results = await uninstallExtensions(cli, sim.run, ['base.ext', 'dependant.ext']);
+		assert.ok(results.every(r => !r.ok));
+		assert.ok(results.every(r => /depends on this/.test(r.message) && !/^Uninstalling/.test(r.message)), results.map(r => r.message).join(' | '));
+	});
+
+	test('a failure in the middle: what came before went, what comes after is still tried', async () => {
+		const sim = realisticCli(['a.b', 'bad.ext', 'c.d'], {}, ['bad.ext']);
+		const results = await uninstallExtensions(cli, sim.run, ['a.b', 'bad.ext', 'c.d']);
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['a.b', true], ['bad.ext', false], ['c.d', true]]);
+	});
+
+	test('it gives up on an extension that fails even when it comes last, and does not loop', async () => {
+		const sim = realisticCli(['x.y', 'bad.ext'], {}, ['bad.ext']);
+		const results = await uninstallExtensions(cli, sim.run, ['x.y', 'bad.ext']);
+		assert.strictEqual(sim.launches.length, 1, 'it was already last, so the first answer was final');
+		assert.deepStrictEqual(results.map(r => r.ok), [true, false]);
+	});
+
+	test('a few blocked extensions are each tried again, and the number of runs stays small', async () => {
+		const ids = ['java.base', 'java.test', 'java.debug', 'go.lang'];
+		const sim = realisticCli(ids, { 'java.base': ['java.test', 'java.debug'] });
+		const results = await uninstallExtensions(cli, sim.run, ids);
+		assert.ok(results.every(r => r.ok));
+		assert.ok(sim.launches.length <= 3, String(sim.launches.length));
+	});
+
+	test('when it fails without saying which extension it was at, nothing is retried', async () => {
+		const run: Runner = async () => ({ code: 1, stdout: '', stderr: 'Profile not found.\n' });
+		const calls: number[] = [];
+		const counting: Runner = async (...a) => { calls.push(1); return run(...a); };
+		const results = await uninstallExtensions(cli, counting, ['a.b', 'c.d'], 'Ghost');
+		assert.strictEqual(calls.length, 1);
+		assert.ok(results.every(r => !r.ok && r.message === 'Profile not found.'));
+	});
+});
