@@ -141,9 +141,10 @@ In the Groups tree it also has **Remove From Group** (it only edits the groups f
   uninstalling anything.
 
 These never uninstall this extension, anything listed in `betterProfiles.keepExtensions`, or anything installed in every profile (VS Code
-installs those once for all of them). Anything else the command line cannot remove is reported. VS Code has no command or API to delete
-or create a profile (only its own screens do), so removing a profile and rebuilding it is not something this extension can do; and it
-would lose the profile's settings, keybindings and snippets.
+installs those once for all of them). Anything else the command line cannot remove is reported. Deleting a profile can only be done
+through VS Code's own screens (its Delete Profile command takes no arguments). A new, empty profile can be made by opening a window
+with `code --profile NAME`, but deleting and rebuilding a profile would lose its settings, keybindings and snippets, so this
+extension does not do it.
 
 Right-click a group in the Groups tree for **Give To A Profile**, **Set Workspace Triggers** and **Delete Group** (the group itself); a
 group inside a profile has the first two and **Remove From Profile**. A profile has **Sync Profile With Its Groups**. The quick **×**
