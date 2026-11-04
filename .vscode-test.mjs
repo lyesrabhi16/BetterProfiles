@@ -6,8 +6,8 @@ import * as path from 'node:path';
 // Every run gets its own user-data and extensions dirs, so the tests never touch your real VS Code profiles.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'better-profiles-test-'));
 
-// BETTER_PROFILES_VSCODE: path to an installed VS Code executable (e.g. on NixOS, where the downloaded build
-// does not run). Without it the latest stable VS Code is downloaded, as in CI.
+// BETTER_PROFILES_VSCODE: path to an installed VS Code executable (the Nix dev shell sets it). Without it the latest
+// stable VS Code is downloaded.
 const installation = process.env.BETTER_PROFILES_VSCODE
 	? { useInstallation: { fromPath: process.env.BETTER_PROFILES_VSCODE } }
 	: { version: 'stable' };

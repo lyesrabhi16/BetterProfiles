@@ -14,6 +14,31 @@ Shows which VS Code profile the current window uses, right in the status bar, an
   - VS Code has not recorded a profile for this workspace yet,
   - the workspace uses a profile that was deleted.
 
+## Install
+
+There is no Marketplace listing yet, so build a `.vsix` from this repository and install that. You need Node.js and npm
+(or the [Nix dev shell](#with-nix), which has them).
+
+```bash
+git clone https://github.com/lyesrabhi16/BetterProfiles.git
+cd BetterProfiles
+npm ci
+npx @vscode/vsce package                              # writes better-profiles-1.0.0.vsix
+code --install-extension better-profiles-1.0.0.vsix
+```
+
+No `code` command on your PATH? In VS Code open the Extensions view, choose **…** then **Install from VSIX…**, and pick the file.
+
+An extension is installed per profile. The command above installs it into the Default profile; for another profile add
+`--profile`:
+
+```bash
+code --install-extension better-profiles-1.0.0.vsix --profile Python
+```
+
+To have it in every profile at once, right-click it in the Extensions view and choose **Apply Extension to all Profiles**.
+VS Code may ask you to reload the window before the status bar item appears.
+
 ## How it works
 
 VS Code gives extensions no API for the current profile, and the Extension Host exposes nothing about it either
@@ -167,24 +192,73 @@ Every command also accepts arguments, so it can be driven without prompts (see `
 
 ## Development
 
+### With Nix
+
+`flake.nix` has two dev shells for Linux (x86_64 and aarch64). They use the `vscode` package from nixpkgs, which is
+unfree, to run the tests in a real VS Code; `flake.lock` pins it.
+
+```bash
+nix develop            # Node.js 22, vsce, and a VS Code for the tests
+npm ci
+npm run test:unit      # pure logic, no VS Code needed
+npm test               # runs inside a real VS Code Extension Host; opens windows, so it needs a display
+```
+
+Without a display (CI, a server), use the headless shell, which adds `xvfb-run`:
+
+```bash
+nix develop .#headless -c xvfb-run -a npm test
+```
+
+The shell sets `BETTER_PROFILES_VSCODE` to that VS Code. It is not put on your PATH, so it never replaces the `code` you
+use; set the variable yourself first to test against another build. The tests pass on VS Code 1.119.0 and on 1.144.0,
+the version `flake.lock` pins at the time of writing. `nix flake update` moves the pin. A flake only sees files git knows
+about, so `git add` new files before running `nix develop`. With direnv, `echo "use flake" > .envrc` loads the shell
+automatically.
+
+### Without Nix
+
+Install Node.js and npm, then:
+
 ```bash
 npm ci
 npm run test:unit      # pure logic, no VS Code needed
 npm test               # also runs inside a real VS Code Extension Host
-                       # (two windows: a single folder, and the two-folder workspace in test-fixtures/multi-root)
 ```
 
-`npm test` downloads VS Code. To use an installed one instead (needed on NixOS), and to run without a display:
+`npm test` downloads the latest stable VS Code. To use one you already have instead, and to run without a display:
 
 ```bash
-BETTER_PROFILES_VSCODE=/path/to/vscode/executable \
+BETTER_PROFILES_VSCODE=/path/to/the/vscode/executable \
 BETTER_PROFILES_HEADLESS=1 \
 xvfb-run -a npm test
 ```
 
-Every run uses its own throwaway user-data and extensions directories, so it never touches your real profiles.
-The workspace opened by the tests (`test-fixtures/workspace é with spaces`) is named with spaces and an accent on
-purpose: VS Code stores its URI percent-encoded, which is what the old detection got wrong.
+(I have not run the download path myself; the tests were run with an installed VS Code.)
+
+### Run it from source
+
+Open the folder in VS Code, accept the recommended extensions (`amodio.tsl-problem-matcher` supplies the problem matcher that
+the watch task uses), run `npm ci`, and press **F5**. The `Run Extension` launch configuration starts `npm: watch` (webpack) and
+opens an *Extension Development Host* window with the extension loaded. After an edit, webpack rebuilds; reload the
+host window to pick it up.
+
+Or without the editor's debugger:
+
+```bash
+npm run compile
+code --extensionDevelopmentPath="$PWD"
+```
+
+An Extension Development Host window cannot tell which profile it is in (see Known limits), so its status bar reads
+`Profile`. Install the `.vsix` to see the real behaviour.
+
+### How the tests run
+
+Every run uses its own throwaway user-data and extensions directories, so it never touches your real profiles, and
+`npm test` makes two windows: a single folder, and the two-folder workspace in `test-fixtures/multi-root`. The single folder
+(`test-fixtures/workspace é with spaces`) is named with spaces and an accent on purpose: VS Code stores its URI
+percent-encoded, which is what the old detection got wrong.
 
 ## What it cannot do: enabling and disabling extensions
 
