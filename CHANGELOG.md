@@ -29,6 +29,8 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- A group shown inside a profile has **Remove From Profile** (a right-click entry and a quick **×** button) instead of Delete Group:
+  the profile stops following the group, which and whose extensions stay. Extensions inside such a group have the quick **×** too.
 - Double-clicking an extension in the Better Profiles tab opens its page. Right-clicking an extension offers Open Extension Page,
   Add to Group, Install in Other Profiles and Copy Extension Id (and Remove From Group inside a group); groups shown inside a
   profile now have the same right-click menu as in the Groups tree.

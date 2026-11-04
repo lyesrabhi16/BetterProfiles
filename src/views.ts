@@ -4,7 +4,7 @@ import { ExtensionCatalog, ExtensionInfo } from './catalog';
 import { CliInvocation, InstalledExtension, Runner, installExtension, listExtensions } from './cli';
 import { DragSource, DropOperation, DropTarget, planDrop } from './dnd';
 import { Profile, profileIcon } from './profiles';
-import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profileLayout, profilesFollowing, removeFromGroup, removeGroup } from './groups';
+import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profileLayout, profilesFollowing, removeFromGroup, removeGroup, unassignGroup } from './groups';
 
 /** What the trees need from the group commands: the groups file, the profile names and the command line. */
 export interface ViewsCore {
@@ -455,7 +455,7 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 				vscode.commands.executeCommand('better-profiles.extensionInstallInProfiles', extensionNodeOf(arg).id)),
 
 			command('better-profiles.view.deleteGroup', async (arg?: unknown) => {
-				const name = groupNameOf(arg);
+				const { name } = nodeOf(arg, 'group'); // the group itself: only from the Groups tree
 				const { config, file } = await core.loadGroups();
 				const followers = profilesFollowing(config, name).map(profile => (profile === ALL_PROFILES ? 'all profiles' : profile));
 				const confirmed = await ui.confirm(
@@ -477,6 +477,23 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 				const { config, file } = await core.loadGroups();
 				await core.saveGroups(file, removeFromGroup(config, group, id));
 				void vscode.window.showInformationMessage(`Removed ${id} from "${group}". Nothing was uninstalled.`);
+			}),
+
+			command('better-profiles.view.removeFromProfile', async (arg?: unknown) => {
+				const { profile, name } = nodeOf(arg, 'profileGroup');
+				const { config, file } = await core.loadGroups();
+				const own = Object.prototype.hasOwnProperty.call(config.profiles, profile) ? config.profiles[profile] : [];
+				if (!own.includes(name)) {
+					// it comes from "*": the profile does not list it, so it cannot leave just this one
+					const choice = await ui.ask(`"${name}" goes to all profiles, so it cannot be taken out of just "${profile}".`, 'Remove From All Profiles');
+					if (choice !== undefined) {
+						await core.saveGroups(file, unassignGroup(config, ALL_PROFILES, name));
+					}
+					return;
+				}
+				await core.saveGroups(file, unassignGroup(config, profile, name));
+				const stillAll = (config.profiles[ALL_PROFILES] ?? []).includes(name);
+				void vscode.window.showInformationMessage(`"${profile}" no longer follows "${name}"${stillAll ? ', which still goes to all profiles' : ''}. Its extensions stay installed.`);
 			}),
 
 			command('better-profiles.view.syncProfile', (arg?: unknown) =>

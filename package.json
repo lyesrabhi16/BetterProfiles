@@ -125,6 +125,11 @@
       {
         "command": "better-profiles.view.installExtensionInProfiles",
         "title": "Install in Other Profiles"
+      },
+      {
+        "command": "better-profiles.view.removeFromProfile",
+        "title": "Remove From Profile",
+        "icon": "$(close)"
       }
     ],
     "configuration": {
@@ -268,6 +273,10 @@
         {
           "command": "better-profiles.view.installExtensionInProfiles",
           "when": "false"
+        },
+        {
+          "command": "better-profiles.view.removeFromProfile",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -354,9 +363,19 @@
           "group": "1_modify@2"
         },
         {
-          "command": "better-profiles.view.deleteGroup",
+          "command": "better-profiles.view.removeFromProfile",
           "when": "view == betterProfiles.profiles && viewItem == profileGroup",
           "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.removeFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "inline"
+        },
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroupExtension",
+          "group": "inline"
         }
       ]
     },

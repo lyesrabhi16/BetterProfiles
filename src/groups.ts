@@ -148,6 +148,24 @@ export function assignGroup(config: GroupsConfig, profile: string, group: string
 	};
 }
 
+/**
+ * Makes a profile (or "*", every profile) stop following a group. The group, its triggers and the other profiles are
+ * untouched, and a profile left with no groups is dropped from the file.
+ */
+export function unassignGroup(config: GroupsConfig, profile: string, group: string): GroupsConfig {
+	const current = has(config.profiles, profile) ? config.profiles[profile] : [];
+	if (!current.includes(group)) {
+		throw new Error(`"${profile}" does not follow the group "${group}".`);
+	}
+	const { [profile]: _old, ...others } = config.profiles;
+	const left = current.filter(name => name !== group);
+	return {
+		groups: { ...config.groups },
+		profiles: left.length > 0 ? { ...others, [profile]: left } : others,
+		...(config.triggers ? { triggers: config.triggers } : {}),
+	};
+}
+
 /** The groups a profile follows: the "*" groups first, then its own. */
 export function assignedGroups(config: GroupsConfig, profile: string): string[] {
 	return unique([

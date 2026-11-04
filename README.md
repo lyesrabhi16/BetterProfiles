@@ -118,8 +118,11 @@ extension about clicks, so two clicks within half a second on the same item coun
 items on a double click (`workbench.list.openMode`), its own double click is used.
 
 **Right-click** an extension for **Open Extension Page**, **Add to Group**, **Install in Other Profiles**, **Copy Extension Id**
-and, when it is shown inside a group, **Remove From Group** (nothing is uninstalled). Right-click a group, in either tree, for
-**Give To A Profile**, **Set Workspace Triggers** and **Delete Group**; a profile for **Sync Profile With Its Groups**.
+and, when it is shown inside a group, **Remove From Group** (nothing is uninstalled). Right-click a group in the Groups tree for
+**Give To A Profile**, **Set Workspace Triggers** and **Delete Group** (the group itself); a group inside a profile has the first two
+and **Remove From Profile**, which only makes that profile stop following it (the group and the installed extensions stay; a group
+given to all profiles offers to remove it from all instead). A profile has **Sync Profile With Its Groups**. The quick **×** button
+removes an extension from its group, and a group from its profile, in one click.
 
 Drag and drop works between the two trees and inside them:
 
