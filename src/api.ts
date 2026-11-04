@@ -19,8 +19,12 @@ export interface PromptUi {
 	 * Resolves to the chosen item's id (or the typed name), or undefined when cancelled.
 	 */
 	pickOne(title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }): Promise<string | undefined>;
-	/** A checkbox list. Nothing is ticked beforehand. Resolves to the ticked ids, or undefined when cancelled. */
-	pickMany(title: string, items: PickItem[]): Promise<string[] | undefined>;
+	/**
+	 * A checkbox list. Nothing is ticked beforehand. Resolves to the ticked ids, or undefined when cancelled.
+	 * With `newItem` the list ends with an entry that, when ticked, asks for a typed name; that name takes its place
+	 * in the result (so a result can hold names that were not in `items`).
+	 */
+	pickMany(title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }): Promise<string[] | undefined>;
 	/** A modal confirmation. */
 	confirm(message: string, detail: string, action: string): Promise<boolean>;
 }

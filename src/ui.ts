@@ -19,12 +19,29 @@ export function createUi(): PromptUi {
 			return vscode.window.showInputBox({ prompt: options!.newItem!.prompt, validateInput: v => (v.trim() ? undefined : 'A name is required.') });
 		},
 
-		pickMany: async (title, items) => {
-			const picked = await vscode.window.showQuickPick(
-				items.map(item => ({ label: item.label, description: item.description, id: item.id })),
-				{ canPickMany: true, title, placeHolder: 'Tick what to uninstall (nothing is ticked by default)' },
-			);
-			return picked?.map(item => item.id);
+		pickMany: async (title, items, options) => {
+			const NEW = '\u0000new';
+			const picks = [
+				...items.map(item => ({ label: item.label, description: item.description, id: item.id })),
+				...(options?.newItem ? [{ label: options.newItem.label, description: undefined, id: NEW }] : []),
+			];
+			const picked = await vscode.window.showQuickPick(picks, { canPickMany: true, title, placeHolder: 'Tick one or more, then press Enter (nothing is ticked by default)' });
+			if (!picked) {
+				return undefined;
+			}
+			const ids: string[] = [];
+			for (const item of picked) {
+				if (item.id !== NEW) {
+					ids.push(item.id);
+					continue;
+				}
+				const typed = await vscode.window.showInputBox({ prompt: options!.newItem!.prompt, validateInput: v => (v.trim() ? undefined : 'A name is required.') });
+				if (typed === undefined) {
+					return undefined; // cancelled while naming: cancel the whole choice
+				}
+				ids.push(typed.trim());
+			}
+			return ids;
 		},
 
 		confirm: async (message, detail, action) =>

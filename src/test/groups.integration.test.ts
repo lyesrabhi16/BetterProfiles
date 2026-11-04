@@ -225,13 +225,13 @@ suite('Extension groups against a fake CLI', () => {
 	interface Script {
 		ask?: (message: string, buttons: string[]) => string | undefined;
 		pickOne?: (title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }) => string | undefined;
-		pickMany?: (title: string, items: PickItem[]) => string[] | undefined;
+		pickMany?: (title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }) => string[] | undefined;
 		confirm?: (message: string, detail: string, action: string) => boolean;
 	}
 
 	let api: BetterProfilesApi;
 	let restoreUi: () => void = () => { };
-	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[] }[], confirm: [] as { message: string; detail: string; action: string }[] };
+	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], confirm: [] as { message: string; detail: string; action: string }[] };
 
 	/** Answers the extension's questions from a script; anything unscripted is declined. */
 	function answer(script: Script) {
@@ -239,7 +239,7 @@ suite('Extension groups against a fake CLI', () => {
 		const original = { ask: api.ui.ask, pickOne: api.ui.pickOne, pickMany: api.ui.pickMany, confirm: api.ui.confirm };
 		api.ui.ask = async (message, ...buttons) => { seen.ask.push({ message, buttons }); return script.ask?.(message, buttons); };
 		api.ui.pickOne = async (title, items, options) => { seen.pickOne.push({ title, items, options }); return script.pickOne?.(title, items, options); };
-		api.ui.pickMany = async (title, items) => { seen.pickMany.push({ title, items }); return script.pickMany?.(title, items); };
+		api.ui.pickMany = async (title, items, options) => { seen.pickMany.push({ title, items, options }); return script.pickMany?.(title, items, options); };
 		api.ui.confirm = async (message, detail, action) => { seen.confirm.push({ message, detail, action }); return script.confirm?.(message, detail, action) ?? false; };
 		restoreUi = () => Object.assign(api.ui, original);
 	}
@@ -296,6 +296,10 @@ suite('Extension groups against a fake CLI', () => {
 		test('"Stop asking" turns autoSync off and installs nothing', async () => {
 			answer({ ask: () => 'Stop asking' });
 			await api.checkSync();
+			// a settings write can take a moment to show up in a fresh read
+			for (let i = 0; i < 60 && config().get('autoSync') !== 'off'; i++) {
+				await new Promise(resolve => setTimeout(resolve, 50));
+			}
 			assert.strictEqual(config().get('autoSync'), 'off');
 			assert.deepStrictEqual(installs(), []);
 			await api.checkSync();
@@ -612,54 +616,70 @@ suite('Extension groups against a fake CLI', () => {
 		});
 
 		suite('Add to group', () => {
-			setup(() => writeGroups({ groups: { web: ['a.b'] }, profiles: { Python: ['web'] }, triggers: { web: ['**/package.json'] } } as Partial<GroupsConfig>));
+			setup(() => writeGroups({ groups: { web: ['a.b'], tools: ['c.d'] }, profiles: { Python: ['web'] }, triggers: { web: ['**/package.json'] } } as Partial<GroupsConfig>));
 
-			test('asks which group (or a new one) and adds the extension the menu was opened for', async () => {
-				answer({ pickOne: () => 'web' });
+			test('is a multiple-select list of the groups, with nothing ticked and a way to start a new one', async () => {
+				answer({ pickMany: () => ['web'] });
 				await exec(ADD, ...fromMenu('x.new'));
-				assert.strictEqual(seen.pickOne.length, 1);
-				assert.ok(seen.pickOne[0].title.includes('x.new'), seen.pickOne[0].title);
-				assert.deepStrictEqual(seen.pickOne[0].items.map(i => i.id), ['web']);
-				assert.ok(seen.pickOne[0].options?.newItem, 'it should offer to start a new group');
+				assert.strictEqual(seen.pickMany.length, 1);
+				assert.strictEqual(seen.pickOne.length, 0, 'it is no longer a single choice');
+				assert.ok(seen.pickMany[0].title.includes('x.new'), seen.pickMany[0].title);
+				assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['web', 'tools']);
+				assert.ok(seen.pickMany[0].items.every(i => !('picked' in i)), 'nothing is ticked beforehand');
+				assert.ok(seen.pickMany[0].options?.newItem, 'it should offer to start a new group');
 				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'x.new']);
+				assert.deepStrictEqual(readGroups().groups.tools, ['c.d'], 'a group that was not ticked is untouched');
+			});
+
+			test('adds the extension to every ticked group in one go', async () => {
+				answer({ pickMany: () => ['web', 'tools'] });
+				await exec(ADD, ...fromMenu('x.new'));
+				assert.deepStrictEqual(readGroups().groups, { web: ['a.b', 'x.new'], tools: ['c.d', 'x.new'] });
+			});
+
+			test('a typed name next to ticked groups starts a new group as well', async () => {
+				answer({ pickMany: () => ['web', 'brand-new'] });
+				await exec(ADD, ...fromMenu('x.new'));
+				const groups = readGroups().groups;
+				assert.deepStrictEqual(groups.web, ['a.b', 'x.new']);
+				assert.deepStrictEqual(groups['brand-new'], ['x.new']);
+				assert.deepStrictEqual(groups.tools, ['c.d']);
 			});
 
 			test('keeps the profiles and the triggers of the file', async () => {
-				answer({ pickOne: () => 'web' });
+				answer({ pickMany: () => ['web', 'tools'] });
 				await exec(ADD, ...fromMenu('x.new'));
 				const file = readGroups() as GroupsConfig;
 				assert.deepStrictEqual(file.profiles, { Python: ['web'] });
 				assert.deepStrictEqual(file.triggers, { web: ['**/package.json'] });
 			});
 
-			test('a typed name starts a new group', async () => {
-				answer({ pickOne: () => 'brand-new' });
-				await exec(ADD, ...fromMenu('x.new'));
-				assert.deepStrictEqual(readGroups().groups['brand-new'], ['x.new']);
-			});
-
-			test('an extension that is already in the group is not added twice, whatever the case', async () => {
-				answer({ pickOne: () => 'web' });
+			test('a group that already holds the extension is not added to twice, whatever the case', async () => {
+				answer({ pickMany: () => ['web', 'tools'] });
 				await exec(ADD, ...fromMenu('A.B'));
 				assert.deepStrictEqual(readGroups().groups.web, ['a.b']);
+				assert.deepStrictEqual(readGroups().groups.tools, ['c.d', 'A.B']);
 			});
 
-			test('cancelling changes nothing', async () => {
+			test('cancelling, or ticking nothing, changes nothing', async () => {
 				const before = fs.readFileSync(groupsFile, 'utf8');
-				answer({ pickOne: () => undefined });
+				answer({ pickMany: () => undefined });
+				await exec(ADD, ...fromMenu('x.new'));
+				answer({ pickMany: () => [] });
 				await exec(ADD, ...fromMenu('x.new'));
 				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
 			});
 
 			test('something that is not an extension id is refused before anything is asked', async () => {
 				await assert.rejects(exec(ADD, '--evil'), /extension id/i);
-				assert.strictEqual(seen.pickOne.length, 0);
+				assert.strictEqual(seen.pickMany.length + seen.pickOne.length, 0);
 			});
 
-			test('programmatic: an object with the group needs no prompt', async () => {
+			test('programmatic: "group" or "groups" in an object needs no prompt', async () => {
 				await exec(ADD, { id: 'x.new', group: 'web' });
-				assert.strictEqual(seen.pickOne.length, 0);
-				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'x.new']);
+				await exec(ADD, { id: 'y.new', groups: ['web', 'tools'] });
+				assert.strictEqual(seen.pickMany.length + seen.pickOne.length, 0);
+				assert.deepStrictEqual(readGroups().groups, { web: ['a.b', 'x.new', 'y.new'], tools: ['c.d', 'y.new'] });
 			});
 		});
 
@@ -824,6 +844,21 @@ suite('Extension groups against a fake CLI', () => {
 			assert.deepStrictEqual(seen.ask[0].buttons, [GIVE]);
 		});
 
+		test('with several groups, syncing is offered if any of them is followed by a profile', async () => {
+			writeGroups({ groups: { web: ['a.b'], lonely: [] }, profiles: { Python: ['web'] } });
+			await exec(ADD_FROM_MENU, { id: 'x.new', groups: ['web', 'lonely'] });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);
+			assert.ok(seen.ask[0].message.includes('web') && seen.ask[0].message.includes('lonely'), seen.ask[0].message);
+		});
+
+		test('with several groups that no profile follows, it offers to give them to a profile', async () => {
+			writeGroups({ groups: { web: ['a.b'], lonely: [], lonelier: [] } });
+			await exec(ADD_FROM_MENU, { id: 'x.new', groups: ['lonely', 'lonelier'] });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.deepStrictEqual(seen.ask[0].buttons, [GIVE]);
+		});
+
 		test('a group given to every profile ("*") counts as followed', async () => {
 			writeGroups({ groups: { web: ['a.b'] }, profiles: { '*': ['web'] } });
 			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' });
@@ -945,9 +980,9 @@ suite('Extension groups against a fake CLI', () => {
 
 		test('the "Add to group" picker marks the groups that already hold the extension', async () => {
 			writeGroups({ groups: { web: ['x.new', 'a.b'], tools: ['c.d'] } });
-			answer({ pickOne: () => undefined });
+			answer({ pickMany: () => undefined });
 			await exec(ADD, 'X.New', { id: 'X.New' });
-			const items = seen.pickOne[0].items;
+			const items = seen.pickMany[0].items;
 			assert.ok(/already/i.test(items.find(i => i.id === 'web')!.description ?? ''), JSON.stringify(items));
 			assert.ok(!/already/i.test(items.find(i => i.id === 'tools')!.description ?? ''), JSON.stringify(items));
 		});
