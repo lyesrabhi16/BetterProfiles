@@ -172,35 +172,70 @@ export function uninstallManyArgs(ids: string[], profile?: string): string[] {
 	return [...ids.flatMap(id => ['--uninstall-extension', id]), ...profileArgs(profile)];
 }
 
+const PROGRESS = /^Uninstalling\s/i;
+
 /**
- * Uninstalls several extensions in ONE run of the CLI (starting it is most of the cost of each). Never throws.
- * With exit code 0 they all went; otherwise the ones the CLI says went are told apart from those it does not.
+ * Uninstalls several extensions in as few runs of the CLI as it can (starting it is most of the cost of each). Never throws.
+ *
+ * The real CLI does them one after the other and STOPS at the first one it cannot do (typically because another extension
+ * needs it), without trying the rest. So when it stops, the extension it stopped at is put last and the others are tried
+ * again: they go, and that one then often goes too (what needed it is gone). One that fails even when it comes last is
+ * reported, with the CLI's own reason, and the rest still go.
  */
 export async function uninstallExtensions(cli: CliInvocation, runner: Runner, ids: string[], profile?: string): Promise<InstallResult[]> {
-	const valid = ids.filter(isExtensionId);
 	const invalid = (id: string): InstallResult => ({ id, ok: false, message: `"${id}" is not a valid extension id (expected publisher.name).` });
+	const key = (id: string) => id.toLowerCase();
+	const valid = [...new Map(ids.filter(isExtensionId).map(id => [key(id), id])).values()];
 	if (valid.length === 0) {
 		return ids.map(invalid);
 	}
-	let result: RunResult;
-	try {
-		result = await run(cli, runner, uninstallManyArgs(valid, profile));
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return ids.map(id => (isExtensionId(id) ? { id, ok: false, message } : invalid(id)));
+	const results = new Map<string, InstallResult>();
+	const succeed = (id: string, message: string) => { results.set(key(id), { id, ok: true, message }); };
+	const fail = (id: string, message: string) => { results.set(key(id), { id, ok: false, message }); };
+	const reasonOf = (result: RunResult, id?: string): string => {
+		const lines = `${result.stderr}\n${result.stdout}`.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '' && !PROGRESS.test(l) && !/was successfully uninstalled/i.test(l));
+		return (id === undefined ? undefined : lines.find(line => key(line).includes(key(id)))) ?? lines[0] ?? `The CLI exited with code ${result.code}.`;
+	};
+
+	let remaining = [...valid];
+	const deferred = new Set<string>();
+	for (let round = 0; remaining.length > 0 && round < valid.length * 2 + 2; round++) {
+		let result: RunResult;
+		try {
+			result = await run(cli, runner, uninstallManyArgs(remaining, profile));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			remaining.forEach(id => fail(id, message));
+			remaining = [];
+			break;
+		}
+		if (result.code === 0) {
+			remaining.forEach(id => succeed(id, lastLine(result.stdout)));
+			remaining = [];
+			break;
+		}
+		const went = new Set([...result.stdout.matchAll(/Extension '([^']+)' was successfully uninstalled/gi)].map(m => key(m[1])));
+		remaining.filter(id => went.has(key(id))).forEach(id => succeed(id, lastLine(result.stdout)));
+		const left = remaining.filter(id => !went.has(key(id)));
+
+		// the CLI names the extension it was at in its last "Uninstalling x..." line
+		const attempted = [...result.stdout.matchAll(/^Uninstalling (\S+?)\.\.\./gm)].map(m => key(m[1]));
+		const stoppedAt = left.find(id => key(id) === attempted[attempted.length - 1]);
+		if (stoppedAt === undefined) {
+			left.forEach(id => fail(id, reasonOf(result, id))); // it failed without saying where: nothing to retry
+			remaining = [];
+			break;
+		}
+		if (deferred.has(stoppedAt) || left[left.length - 1] === stoppedAt) {
+			fail(stoppedAt, reasonOf(result)); // it failed after everything else was done, or after being tried last already
+			remaining = left.filter(id => id !== stoppedAt);
+		} else {
+			deferred.add(stoppedAt);
+			remaining = [...left.filter(id => id !== stoppedAt), stoppedAt];
+		}
 	}
-	const went = new Set([...result.stdout.matchAll(/Extension '([^']+)' was successfully uninstalled/gi)].map(m => m[1].toLowerCase()));
-	const lines = `${result.stderr}\n${result.stdout}`.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
-	return ids.map((id): InstallResult => {
-		if (!isExtensionId(id)) {
-			return invalid(id);
-		}
-		if (result.code === 0 || went.has(id.toLowerCase())) {
-			return { id, ok: true, message: lastLine(result.stdout) };
-		}
-		const about = lines.find(line => line.toLowerCase().includes(id.toLowerCase()));
-		return { id, ok: false, message: about ?? (firstLine(result.stderr) || firstLine(result.stdout) || `The CLI exited with code ${result.code}.`) };
-	});
+	remaining.forEach(id => fail(id, 'The CLI could not uninstall it.'));
+	return ids.map(id => (isExtensionId(id) ? results.get(key(id))! : invalid(id)));
 }
 
 /** Real runner: the CLI is slow to start but never needs a shell, so arguments are passed as they are. */

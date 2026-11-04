@@ -21,6 +21,11 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- Removing several extensions from a profile failed as a whole when one of them could not be uninstalled: VS Code's command line stops at
+  the first extension it cannot remove (for example Java language support, which the Java test runner needs) and does not try the
+  rest, and every extension was reported with that one error (or with its "Uninstalling x..." progress line). The extension it stopped
+  at is now put last and the others are tried again; most dependencies are then gone and it goes too. One that fails even last is
+  reported with the real reason and the others still go.
 - Removing a group or an extension from a profile was slow: the profiles were listed one after the other before the question
   appeared (with nothing on screen), each extension was uninstalled by a separate start of VS Code's command line, and the tree
   listed the profile again afterwards. Now the profile is listed first (and the others only when something may have to be

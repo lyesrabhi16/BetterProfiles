@@ -143,7 +143,7 @@ suite('Extension groups against a fake CLI', () => {
 			assert.ok(/\| p\.py \|\s*\| ✓ \|/.test(md), md);
 
 			const profilesAsked = calls().map(a => (a.includes('--profile') ? a[a.indexOf('--profile') + 1] : 'Default'));
-			assert.deepStrictEqual(profilesAsked, ['Default', 'Python', 'Agents']);
+			assert.deepStrictEqual([...profilesAsked].sort(), ['Agents', 'Default', 'Python'], 'each profile once; they are asked side by side, so in no fixed order');
 			assert.ok(calls().every(a => a.includes('--list-extensions')));
 		});
 	});
