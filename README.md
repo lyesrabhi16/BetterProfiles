@@ -102,7 +102,7 @@ show up in every column of the comparison.
 An icon in the Activity Bar opens two trees:
 
 - **Groups**: every group, how many extensions it has and which profiles follow it. Expand one to see its extensions.
-- **Profiles**: Default and every profile, the current one marked. Expanding a profile asks VS Code's command line what it
+- **Profiles**: Default and every profile, each with its own icon when it has one and the current one marked. Expanding a profile asks VS Code's command line what it
   has, once; **Refresh** asks again.
 
 Extensions are shown the way VS Code's own Extensions list shows them: the icon image and the display name, with the

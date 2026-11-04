@@ -102,7 +102,12 @@ export function detectProfile(storage: StorageSnapshot, window: WindowContext): 
 // Codicon ids are letters, digits and dashes; anything else would break the `$(icon)` syntax.
 const ICON_ID = /^[a-z0-9][a-z0-9-]*$/i;
 
-const iconOf = (profile: Profile): string => (profile.icon && ICON_ID.test(profile.icon) ? profile.icon : DEFAULT_ICON);
+/** The profile's own icon (a codicon id), only when it has a valid one. */
+export function profileIcon(profile: Profile): string | undefined {
+	return profile.icon && ICON_ID.test(profile.icon) ? profile.icon : undefined;
+}
+
+const iconOf = (profile: Profile): string => profileIcon(profile) ?? DEFAULT_ICON;
 
 // A profile named "$(rocket) x" must not turn into an icon: escape it as VS Code expects.
 const escapeLabel = (text: string): string => text.replace(/\$\(/g, () => '\\$(');

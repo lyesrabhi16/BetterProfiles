@@ -686,6 +686,6 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		groupsFilePath,
 		groupedExtensions: () => grouped,
 		refreshGroupedContext,
-		core: { loadGroups, saveGroups, profileNames, resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event },
+		core: { loadGroups, saveGroups, profileNames, profiles: () => api.getProfiles(), resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event },
 	};
 }

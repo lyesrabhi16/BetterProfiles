@@ -1111,6 +1111,20 @@ suite('Extension groups against a fake CLI', () => {
 				assert.strictEqual(items[0].contextValue, 'profile');
 			});
 
+			test('a profile shows its own icon when it has one, and the generic icon otherwise', async () => {
+				const iconId = async (name: string) => ((await item('profiles', profile(name))).iconPath as vscode.ThemeIcon).id;
+				assert.strictEqual(await iconId('Python'), 'snake');
+				assert.strictEqual(await iconId('Agents'), 'account', 'no icon of its own');
+				assert.strictEqual(await iconId('Default'), 'account');
+			});
+
+			test('an icon that is not a valid codicon id falls back to the generic one', async () => {
+				const storage = path.join(dir, 'odd-icon.json');
+				fs.writeFileSync(storage, JSON.stringify({ userDataProfiles: [{ name: 'Odd', location: 'odd', icon: 'not a codicon!' }], profileAssociations: { workspaces: {} } }));
+				await set('storageFile', storage);
+				assert.strictEqual(((await item('profiles', profile('Odd'))).iconPath as vscode.ThemeIcon).id, 'account');
+			});
+
 			test('a profile lists the extensions it has, with their versions, sorted', async () => {
 				const kids = await children('profiles', profile('Python'));
 				assert.deepStrictEqual(kids.map(n => n.id), ['p.installed', 'shared.x']);

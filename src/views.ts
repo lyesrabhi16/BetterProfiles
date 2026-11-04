@@ -3,6 +3,7 @@ import type { PromptUi, TreeViewHandles } from './api';
 import { ExtensionCatalog, ExtensionInfo } from './catalog';
 import { CliInvocation, InstalledExtension, Runner, installExtension, listExtensions } from './cli';
 import { DragSource, DropOperation, DropTarget, planDrop } from './dnd';
+import { Profile, profileIcon } from './profiles';
 import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profilesFollowing, removeFromGroup, removeGroup } from './groups';
 
 /** What the trees need from the group commands: the groups file, the profile names and the command line. */
@@ -10,6 +11,8 @@ export interface ViewsCore {
 	loadGroups(): Promise<{ config: GroupsConfig; file: string }>;
 	saveGroups(file: string, config: GroupsConfig): Promise<void>;
 	profileNames(): Promise<string[]>;
+	/** The profiles VS Code has recorded (not Default), with their icons. */
+	profiles(): Promise<Profile[]>;
 	resolveCli(): CliInvocation;
 	run: Runner;
 	/** Where the installed extensions are, to read their names and icons from. */
@@ -153,7 +156,9 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 				const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Collapsed);
 				item.description = node.name === (await this.core.currentProfileName()) ? 'current' : undefined;
 				item.contextValue = 'profile';
-				item.iconPath = new vscode.ThemeIcon('account');
+				// the profile's own icon when it has one, like VS Code shows it
+				const own = (await this.core.profiles()).find(candidate => candidate.name === node.name);
+				item.iconPath = new vscode.ThemeIcon((own && profileIcon(own)) ?? 'account');
 				return item;
 			}
 			case 'profileExtension': {

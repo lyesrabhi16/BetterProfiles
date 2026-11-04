@@ -8,6 +8,7 @@ import {
 	associationKey,
 	detectProfile,
 	parseStorage,
+	profileIcon,
 	statusText,
 	statusTooltip,
 } from '../../profiles';
@@ -179,5 +180,22 @@ suite('statusTooltip', () => {
 
 	test('names the profile when known', () => {
 		assert.ok(statusTooltip({ kind: 'profile', profile: PY }).includes('Python'));
+	});
+});
+
+suite('profileIcon', () => {
+	test('is the profile\'s own icon when it has a valid one', () => {
+		assert.strictEqual(profileIcon({ name: 'Python', location: 'p', icon: 'snake' }), 'snake');
+		assert.strictEqual(profileIcon({ name: 'x', location: 'x', icon: 'settings-view-bar-icon' }), 'settings-view-bar-icon');
+	});
+
+	test('is nothing when the profile has none', () => {
+		assert.strictEqual(profileIcon({ name: 'Agents', location: 'agents' }), undefined);
+	});
+
+	test('is nothing for an icon that is not a valid codicon id', () => {
+		for (const icon of ['bad) icon', '', '$(x)', '../x', 'a b']) {
+			assert.strictEqual(profileIcon({ name: 'x', location: 'x', icon }), undefined, JSON.stringify(icon));
+		}
 	});
 });

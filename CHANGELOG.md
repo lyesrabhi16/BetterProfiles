@@ -21,6 +21,7 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Profiles in the Better Profiles tab show their own icon (the one set in VS Code) when they have a valid one.
 - Extensions in the Better Profiles tab are shown like in VS Code's Extensions list: their icon image and display name (localised names
   resolved), the publisher or version beside them, and the id and description in the tooltip. Read from each extension's own folder, so
   nothing is fetched. New `betterProfiles.extensionsDir` setting, also used to point the command line at the right installation.
