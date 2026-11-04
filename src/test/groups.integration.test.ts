@@ -224,19 +224,21 @@ suite('Extension groups against a fake CLI', () => {
 
 	interface Script {
 		ask?: (message: string, buttons: string[]) => string | undefined;
+		pickOne?: (title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }) => string | undefined;
 		pickMany?: (title: string, items: PickItem[]) => string[] | undefined;
 		confirm?: (message: string, detail: string, action: string) => boolean;
 	}
 
 	let api: BetterProfilesApi;
 	let restoreUi: () => void = () => { };
-	const seen = { ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[] }[], confirm: [] as { message: string; detail: string; action: string }[] };
+	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[] }[], confirm: [] as { message: string; detail: string; action: string }[] };
 
 	/** Answers the extension's questions from a script; anything unscripted is declined. */
 	function answer(script: Script) {
-		seen.ask.length = seen.pickMany.length = seen.confirm.length = 0;
-		const original = { ask: api.ui.ask, pickMany: api.ui.pickMany, confirm: api.ui.confirm };
+		seen.ask.length = seen.pickOne.length = seen.pickMany.length = seen.confirm.length = 0;
+		const original = { ask: api.ui.ask, pickOne: api.ui.pickOne, pickMany: api.ui.pickMany, confirm: api.ui.confirm };
 		api.ui.ask = async (message, ...buttons) => { seen.ask.push({ message, buttons }); return script.ask?.(message, buttons); };
+		api.ui.pickOne = async (title, items, options) => { seen.pickOne.push({ title, items, options }); return script.pickOne?.(title, items, options); };
 		api.ui.pickMany = async (title, items) => { seen.pickMany.push({ title, items }); return script.pickMany?.(title, items); };
 		api.ui.confirm = async (message, detail, action) => { seen.confirm.push({ message, detail, action }); return script.confirm?.(message, detail, action) ?? false; };
 		restoreUi = () => Object.assign(api.ui, original);
@@ -548,6 +550,226 @@ suite('Extension groups against a fake CLI', () => {
 			} as Partial<GroupsConfig>);
 			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
 			assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['extra.a']);
+		});
+	});
+
+
+	suite('the gear menu of an extension in the Extensions view', () => {
+		const ADD = 'better-profiles.extensionAddToGroup';
+		const REMOVE = 'better-profiles.extensionRemoveFromGroup';
+		const INSTALL = 'better-profiles.extensionInstallInProfiles';
+		const ALL = [ADD, REMOVE, INSTALL];
+		// what VS Code passes to a command from the extension/context menu: the id, then an object about the extension
+		const fromMenu = (id: string) => [id, { id, version: '1.0.0', location: undefined, galleryLink: undefined }] as const;
+
+		interface InstallReport { id: string; results: { profile: string; ok: boolean; message: string }[]; alreadyHad: string[] }
+
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			await api.resetPrompts();
+			writeState({ Default: ['common.one'], Python: ['p.installed'], Agents: [] });
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		suite('contributions', () => {
+			const contributes = () => vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
+
+			test('three entries in the extension/context menu, only for installed extensions that are not built in', () => {
+				const entries: { command: string; when: string; group: string }[] = contributes().menus?.['extension/context'] ?? [];
+				assert.deepStrictEqual(entries.map(e => e.command).sort(), [...ALL].sort());
+				for (const e of entries) {
+					assert.ok(e.when.includes('extensionStatus == installed'), e.when);
+					assert.ok(e.when.includes('!isBuiltinExtension'), e.when);
+					assert.ok(e.group.startsWith('2_profiles'), e.group);
+				}
+			});
+
+			test('they are declared and registered, and kept out of the Command Palette because they need an extension to act on', async () => {
+				const declared = (contributes().commands as { command: string }[]).map(c => c.command);
+				const registered = new Set(await vscode.commands.getCommands(true));
+				const palette: { command: string; when: string }[] = contributes().menus?.commandPalette ?? [];
+				for (const id of ALL) {
+					assert.ok(declared.includes(id), 'declared ' + id);
+					assert.ok(registered.has(id), 'registered ' + id);
+					assert.ok(palette.some(p => p.command === id && p.when === 'false'), 'hidden from the palette: ' + id);
+				}
+			});
+		});
+
+		suite('Add to group', () => {
+			setup(() => writeGroups({ groups: { web: ['a.b'] }, profiles: { Python: ['web'] }, triggers: { web: ['**/package.json'] } } as Partial<GroupsConfig>));
+
+			test('asks which group (or a new one) and adds the extension the menu was opened for', async () => {
+				answer({ pickOne: () => 'web' });
+				await exec(ADD, ...fromMenu('x.new'));
+				assert.strictEqual(seen.pickOne.length, 1);
+				assert.ok(seen.pickOne[0].title.includes('x.new'), seen.pickOne[0].title);
+				assert.deepStrictEqual(seen.pickOne[0].items.map(i => i.id), ['web']);
+				assert.ok(seen.pickOne[0].options?.newItem, 'it should offer to start a new group');
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'x.new']);
+			});
+
+			test('keeps the profiles and the triggers of the file', async () => {
+				answer({ pickOne: () => 'web' });
+				await exec(ADD, ...fromMenu('x.new'));
+				const file = readGroups() as GroupsConfig;
+				assert.deepStrictEqual(file.profiles, { Python: ['web'] });
+				assert.deepStrictEqual(file.triggers, { web: ['**/package.json'] });
+			});
+
+			test('a typed name starts a new group', async () => {
+				answer({ pickOne: () => 'brand-new' });
+				await exec(ADD, ...fromMenu('x.new'));
+				assert.deepStrictEqual(readGroups().groups['brand-new'], ['x.new']);
+			});
+
+			test('an extension that is already in the group is not added twice, whatever the case', async () => {
+				answer({ pickOne: () => 'web' });
+				await exec(ADD, ...fromMenu('A.B'));
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b']);
+			});
+
+			test('cancelling changes nothing', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				answer({ pickOne: () => undefined });
+				await exec(ADD, ...fromMenu('x.new'));
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+			});
+
+			test('something that is not an extension id is refused before anything is asked', async () => {
+				await assert.rejects(exec(ADD, '--evil'), /extension id/i);
+				assert.strictEqual(seen.pickOne.length, 0);
+			});
+
+			test('programmatic: an object with the group needs no prompt', async () => {
+				await exec(ADD, { id: 'x.new', group: 'web' });
+				assert.strictEqual(seen.pickOne.length, 0);
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'x.new']);
+			});
+		});
+
+		suite('Remove from group', () => {
+			setup(() => writeGroups({
+				groups: { web: ['a.b', 'x.one'], tools: ['X.One'], other: ['o.one'] },
+				profiles: { Python: ['web'] },
+				triggers: { web: ['**/package.json'] },
+			} as Partial<GroupsConfig>));
+
+			test('offers only the groups that hold the extension, and removes it from the ticked ones', async () => {
+				answer({ pickMany: () => ['tools'] });
+				await exec(REMOVE, ...fromMenu('x.one'));
+				assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['web', 'tools']);
+				assert.ok(seen.pickMany[0].title.includes('x.one'), seen.pickMany[0].title);
+				const file = readGroups() as GroupsConfig;
+				assert.deepStrictEqual(file.groups, { web: ['a.b', 'x.one'], tools: [], other: ['o.one'] });
+				assert.deepStrictEqual(file.profiles, { Python: ['web'] });
+				assert.deepStrictEqual(file.triggers, { web: ['**/package.json'] });
+			});
+
+			test('never runs a CLI: taking an extension out of a group uninstalls nothing', async () => {
+				answer({ pickMany: () => ['web', 'tools'] });
+				await exec(REMOVE, ...fromMenu('x.one'));
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('an extension that is in no group changes nothing and asks nothing', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				await exec(REMOVE, ...fromMenu('z.nowhere'));
+				assert.strictEqual(seen.pickMany.length, 0);
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+			});
+
+			test('cancelling, or ticking nothing, changes nothing', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				answer({ pickMany: () => undefined });
+				await exec(REMOVE, ...fromMenu('x.one'));
+				answer({ pickMany: () => [] });
+				await exec(REMOVE, ...fromMenu('x.one'));
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+			});
+
+			test('programmatic: named groups need no prompt, and a group that does not hold it is refused', async () => {
+				await exec(REMOVE, { id: 'x.one', groups: ['web'] });
+				assert.strictEqual(seen.pickMany.length, 0);
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b']);
+				await assert.rejects(exec(REMOVE, { id: 'x.one', groups: ['other'] }), /not in the group/i);
+			});
+		});
+
+		suite('Install in other profiles', () => {
+			setup(() => writeGroups({ groups: {} }));
+
+			test('offers the profiles that lack the extension, nothing ticked, and installs into the ticked ones only', async () => {
+				answer({ pickMany: () => ['Python'] });
+				const report = await exec<InstallReport>(INSTALL, ...fromMenu('x.new'));
+				assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['Default', 'Python', 'Agents']);
+				assert.ok(seen.pickMany[0].title.includes('x.new'), seen.pickMany[0].title);
+				assert.ok(seen.pickMany[0].items.every(i => !('picked' in i)), 'nothing is pre-selected');
+				assert.deepStrictEqual(installs(), [['--install-extension', 'x.new', '--profile', 'Python']]);
+				assert.deepStrictEqual(report.results.map(r => [r.profile, r.ok]), [['Python', true]]);
+				assert.ok(readState().Python.includes('x.new'));
+				assert.ok(!readState().Default.includes('x.new') && !readState().Agents.includes('x.new'));
+			});
+
+			test('does not offer a profile that already has it', async () => {
+				writeState({ Default: ['common.one'], Python: ['X.New'], Agents: [] });
+				await exec(INSTALL, ...fromMenu('x.new'));
+				assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['Default', 'Agents']);
+			});
+
+			test('an extension every profile has (application scoped) asks nothing and installs nothing', async () => {
+				writeState({ Default: ['shared.x'], Python: ['shared.x'], Agents: ['shared.x'] });
+				const report = await exec<InstallReport>(INSTALL, ...fromMenu('shared.x'));
+				assert.strictEqual(seen.pickMany.length, 0);
+				assert.deepStrictEqual(installs(), []);
+				assert.deepStrictEqual(report.alreadyHad.sort(), ['Agents', 'Default', 'Python']);
+			});
+
+			test('cancelling, or ticking nothing, installs nothing', async () => {
+				answer({ pickMany: () => undefined });
+				await exec(INSTALL, ...fromMenu('x.new'));
+				answer({ pickMany: () => [] });
+				await exec(INSTALL, ...fromMenu('x.new'));
+				assert.deepStrictEqual(installs(), []);
+			});
+
+			test('never uninstalls anything', async () => {
+				answer({ pickMany: () => ['Python', 'Agents'] });
+				await exec(INSTALL, ...fromMenu('x.new'));
+				assert.ok(calls().every(a => !a.some(x => /uninstall|remove|disable/i.test(x))));
+			});
+
+			test('programmatic: named profiles need no prompt, and Default is installed into without --profile', async () => {
+				await exec(INSTALL, { id: 'x.new', profiles: ['Default', 'Agents'] });
+				assert.strictEqual(seen.pickMany.length, 0);
+				assert.deepStrictEqual(installs(), [['--install-extension', 'x.new'], ['--install-extension', 'x.new', '--profile', 'Agents']]);
+			});
+
+			test('programmatic: a profile that already has it is skipped and reported', async () => {
+				writeState({ Default: [], Python: ['x.new'], Agents: [] });
+				const report = await exec<InstallReport>(INSTALL, { id: 'x.new', profiles: ['Python', 'Agents'] });
+				assert.deepStrictEqual(installs(), [['--install-extension', 'x.new', '--profile', 'Agents']]);
+				assert.deepStrictEqual(report.alreadyHad, ['Python']);
+			});
+
+			test('programmatic: an unknown profile is refused before anything runs', async () => {
+				await assert.rejects(exec(INSTALL, { id: 'x.new', profiles: ['Nope'] }), /Nope/);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('something that is not an extension id is refused before any CLI starts', async () => {
+				await assert.rejects(exec(INSTALL, '--evil'), /extension id/i);
+				await assert.rejects(exec(INSTALL, '../x.vsix'), /extension id/i);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('a failed install is reported per profile and the others still run', async () => {
+				const report = await exec<InstallReport>(INSTALL, { id: 'fail.ext', profiles: ['Python', 'Agents'] });
+				assert.deepStrictEqual(report.results.map(r => [r.profile, r.ok]), [['Python', false], ['Agents', false]]);
+				assert.ok(report.results[0].message.includes("'fail.ext' not found"), report.results[0].message);
+				assert.strictEqual(installs().length, 2, 'it must have tried both');
+			});
 		});
 	});
 

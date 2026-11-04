@@ -299,3 +299,13 @@ export function triggeredGroups(config: GroupsConfig, profile: string): { group:
 		.filter(group => (config.triggers?.[group]?.length ?? 0) > 0)
 		.map(group => ({ group, patterns: config.triggers![group] }));
 }
+
+/** The groups that contain an extension (ids compare case-insensitively), in the order of the file. */
+export function groupsContaining(_config: GroupsConfig, _id: string): string[] {
+	throw new Error('not implemented');
+}
+
+/** Takes an extension out of one group. Nothing else changes; in particular nothing is uninstalled. */
+export function removeFromGroup(_config: GroupsConfig, _group: string, _id: string): GroupsConfig {
+	throw new Error('not implemented');
+}

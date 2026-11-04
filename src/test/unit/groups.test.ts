@@ -4,6 +4,8 @@ import {
 	GroupsConfig,
 	addToGroup,
 	assignedGroups,
+	groupsContaining,
+	removeFromGroup,
 	isTriggerPattern,
 	setTriggers,
 	triggeredGroups,
@@ -431,5 +433,56 @@ suite('wanted extensions where a workspace matches only some triggers', () => {
 	test('cleanup still sees every assigned group, so a group this workspace does not need is never offered for removal', () => {
 		const plan = planCleanup(c, 'Mobile', ['c.one', 'f.one', 'p.one', 'x.extra'], []);
 		assert.deepStrictEqual(plan.extras, ['x.extra']);
+	});
+});
+
+suite('groupsContaining', () => {
+	const c: GroupsConfig = { groups: { web: ['A.One', 'b.two'], tools: ['a.one'], empty: [] }, profiles: {} };
+
+	test('lists the groups that hold the extension, case-insensitively, in file order', () => {
+		assert.deepStrictEqual(groupsContaining(c, 'a.ONE'), ['web', 'tools']);
+		assert.deepStrictEqual(groupsContaining(c, 'b.two'), ['web']);
+	});
+
+	test('an extension in no group gives an empty list', () => {
+		assert.deepStrictEqual(groupsContaining(c, 'z.nope'), []);
+	});
+});
+
+suite('removeFromGroup', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['A.One', 'b.two'], tools: ['a.one'] },
+		profiles: { Python: ['web'] },
+		triggers: { web: ['**/package.json'] },
+	};
+
+	test('removes the extension from that group only, matching case-insensitively', () => {
+		const next = removeFromGroup(c, 'web', 'a.one');
+		assert.deepStrictEqual(next.groups, { web: ['b.two'], tools: ['a.one'] });
+	});
+
+	test('keeps the profiles and the triggers, and leaves the original untouched', () => {
+		const next = removeFromGroup(c, 'web', 'b.two');
+		assert.deepStrictEqual(next.profiles, c.profiles);
+		assert.deepStrictEqual(next.triggers, c.triggers);
+		assert.deepStrictEqual(c.groups.web, ['A.One', 'b.two']);
+	});
+
+	test('a group left empty is kept (profiles and triggers still point at it)', () => {
+		const next = removeFromGroup(c, 'tools', 'a.one');
+		assert.deepStrictEqual(next.groups.tools, []);
+	});
+
+	test('an extension that is not in the group is a no-op', () => {
+		assert.deepStrictEqual(removeFromGroup(c, 'web', 'z.nope'), c);
+	});
+
+	test('a group that does not exist is an error', () => {
+		assert.throws(() => removeFromGroup(c, 'ghost', 'a.one'), /no group/i);
+	});
+
+	test('a config without triggers stays without a triggers key', () => {
+		const plain: GroupsConfig = { groups: { g: ['a.b'] }, profiles: {} };
+		assert.ok(!('triggers' in removeFromGroup(plain, 'g', 'a.b')));
 	});
 });
