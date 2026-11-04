@@ -159,6 +159,42 @@ export const installExtension = (cli: CliInvocation, runner: Runner, id: string,
 export const uninstallExtension = (cli: CliInvocation, runner: Runner, id: string, profile?: string): Promise<InstallResult> =>
 	changeExtension(cli, runner, id, uninstallArgs(id, profile));
 
+/** One flag per extension and the profile once: the CLI takes several in a single run, and each run costs a start-up. */
+export function uninstallManyArgs(ids: string[], profile?: string): string[] {
+	return [...ids.flatMap(id => ['--uninstall-extension', id]), ...profileArgs(profile)];
+}
+
+/**
+ * Uninstalls several extensions in ONE run of the CLI (starting it is most of the cost of each). Never throws.
+ * With exit code 0 they all went; otherwise the ones the CLI says went are told apart from those it does not.
+ */
+export async function uninstallExtensions(cli: CliInvocation, runner: Runner, ids: string[], profile?: string): Promise<InstallResult[]> {
+	const valid = ids.filter(isExtensionId);
+	const invalid = (id: string): InstallResult => ({ id, ok: false, message: `"${id}" is not a valid extension id (expected publisher.name).` });
+	if (valid.length === 0) {
+		return ids.map(invalid);
+	}
+	let result: RunResult;
+	try {
+		result = await run(cli, runner, uninstallManyArgs(valid, profile));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return ids.map(id => (isExtensionId(id) ? { id, ok: false, message } : invalid(id)));
+	}
+	const went = new Set([...result.stdout.matchAll(/Extension '([^']+)' was successfully uninstalled/gi)].map(m => m[1].toLowerCase()));
+	const lines = `${result.stderr}\n${result.stdout}`.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+	return ids.map((id): InstallResult => {
+		if (!isExtensionId(id)) {
+			return invalid(id);
+		}
+		if (result.code === 0 || went.has(id.toLowerCase())) {
+			return { id, ok: true, message: lastLine(result.stdout) };
+		}
+		const about = lines.find(line => line.toLowerCase().includes(id.toLowerCase()));
+		return { id, ok: false, message: about ?? (firstLine(result.stderr) || firstLine(result.stdout) || `The CLI exited with code ${result.code}.`) };
+	});
+}
+
 /** Real runner: the CLI is slow to start but never needs a shell, so arguments are passed as they are. */
 export const defaultRunner: Runner = (command, args, env) =>
 	new Promise((resolve, reject) => {

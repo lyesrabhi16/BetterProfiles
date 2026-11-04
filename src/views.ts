@@ -19,7 +19,7 @@ export interface ViewsCore {
 	extensionsDir(): string | undefined;
 	onDidChangeGroups: vscode.Event<void>;
 	/** A profile's list of extensions changed behind the tree's back (something was uninstalled from it). */
-	onDidChangeProfileExtensions: vscode.Event<string>;
+	onDidChangeProfileExtensions: vscode.Event<{ profile: string; removed: string[] }>;
 	/** An extension installed on purpose is wanted again: lifts the profile's exclusion of it. */
 	forgetExclusions(profile: string, ids: readonly string[]): Promise<void>;
 	currentProfileName(): Promise<string | undefined>;
@@ -120,12 +120,25 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) {
 		// the groups decide how a profile's extensions are laid out; what each profile has is unchanged, so its lists are kept
 		core.onDidChangeGroups(() => this.changed.fire());
-		core.onDidChangeProfileExtensions(profile => this.invalidate(profile));
+		core.onDidChangeProfileExtensions(({ profile, removed }) => this.dropFromList(profile, removed));
 	}
 
 	/** Forgets every list and reads them again when a profile is next opened. */
 	refresh(): void {
 		this.cache.clear();
+		this.catalog.clear();
+		this.changed.fire();
+	}
+
+	/** Takes what was uninstalled out of the list the tree already has, instead of asking the command line again. */
+	dropFromList(profile: string, removed: readonly string[]): void {
+		const gone = new Set(removed.map(id => id.toLowerCase()));
+		const known = this.cache.get(profile);
+		if (known) {
+			const next = known.then(list => list.filter(e => !gone.has(e.id.toLowerCase())));
+			this.cache.set(profile, next);
+			next.catch(() => this.cache.delete(profile));
+		}
 		this.catalog.clear();
 		this.changed.fire();
 	}

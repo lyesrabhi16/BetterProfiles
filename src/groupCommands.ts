@@ -11,6 +11,7 @@ import {
 	defaultRunner,
 	installExtension,
 	listExtensions,
+	uninstallExtensions,
 	isInstalledExtensionPath,
 	pickExtensionsDir,
 	resolveCli,
@@ -130,7 +131,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	let grouped: readonly string[] = [];
 	const groupsChanged = new vscode.EventEmitter<void>();
 	/** A profile's own list of extensions changed (something was uninstalled from it). */
-	const profileExtensionsChanged = new vscode.EventEmitter<string>();
+	const profileExtensionsChanged = new vscode.EventEmitter<{ profile: string; removed: string[] }>();
 
 	/**
 	 * A menu entry's label is fixed text, so group names cannot appear in the Extensions view menu. What a menu can do
@@ -456,13 +457,11 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return markdown;
 	};
 
-	/** What every profile has, by profile. */
-	async function listEveryProfile(cli: CliInvocation): Promise<Map<string, string[]>> {
-		const lists = new Map<string, string[]>();
-		for (const name of await profileNames()) {
-			lists.set(name, (await listExtensions(cli, run, name)).map(e => e.id));
-		}
-		return lists;
+	/** What every profile has, by profile. The runs of the CLI go side by side: each one is mostly start-up. */
+	async function listEveryProfile(cli: CliInvocation, known: Map<string, string[]> = new Map()): Promise<Map<string, string[]>> {
+		const names = await profileNames();
+		const lists = await Promise.all(names.map(async name => known.get(name) ?? (await listExtensions(cli, run, name)).map(e => e.id)));
+		return new Map(names.map((name, i) => [name, lists[i]]));
 	}
 
 	/** What must never be uninstalled from one profile, whatever asked for it. */
@@ -481,26 +480,36 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	/** Which of these the profile has, split into what can go and what must stay. */
 	async function planRemoval(cli: CliInvocation, profile: string, ids: string[]): Promise<{ remove: string[]; kept: string[] }> {
-		const lists = await listEveryProfile(cli);
-		const protectedIds = new Set(protectedFromRemoval(lists).map(lower));
-		const have = new Map((lists.get(profile) ?? []).map(id => [lower(id), id]));
-		const here = [...new Set(ids.map(lower))].flatMap(id => have.get(id) ?? []);
-		return { remove: here.filter(id => !protectedIds.has(lower(id))), kept: here.filter(id => protectedIds.has(lower(id))) };
+		return withProgress(`Looking at what "${profile}" has…`, async () => {
+			// the profile first: when it has none of them there is nothing to protect, and the others need not be listed
+			const own = (await listExtensions(cli, run, profile)).map(e => e.id);
+			const have = new Map(own.map(id => [lower(id), id]));
+			const here = [...new Set(ids.map(lower))].flatMap(id => have.get(id) ?? []);
+			if (here.length === 0) {
+				return { remove: [], kept: [] };
+			}
+			const lists = await listEveryProfile(cli, new Map([[profile, own]]));
+			const protectedIds = new Set(protectedFromRemoval(lists).map(lower));
+			return { remove: here.filter(id => !protectedIds.has(lower(id))), kept: here.filter(id => protectedIds.has(lower(id))) };
+		});
 	}
 
 	async function uninstallAll(cli: CliInvocation, profile: string, ids: string[], report: RemovalReport): Promise<void> {
-		await withProgress(`Uninstalling from "${profile}"…`, async () => {
-			for (const id of ids) {
-				const result = await uninstallExtension(cli, run, id, profile);
-				if (result.ok) {
-					report.uninstalled.push(id);
-				} else {
-					log.error(`uninstall ${id} <- ${profile}: ${result.message}`);
-					report.failed.push(id);
-				}
+		if (ids.length === 0) {
+			return;
+		}
+		const results = await withProgress(`Uninstalling ${ids.length === 1 ? ids[0] : `${ids.length} extensions`} from "${profile}"…`, () => uninstallExtensions(cli, run, ids, profile));
+		for (const result of results) {
+			if (result.ok) {
+				report.uninstalled.push(result.id);
+			} else {
+				log.error(`uninstall ${result.id} <- ${profile}: ${result.message}`);
+				report.failed.push(result.id);
 			}
-		});
-		profileExtensionsChanged.fire(profile);
+		}
+		if (report.uninstalled.length > 0) {
+			profileExtensionsChanged.fire({ profile, removed: [...report.uninstalled] });
+		}
 	}
 
 	const checkedProfile = async (profile: unknown): Promise<string> => {

@@ -11,6 +11,12 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- Removing a group or an extension from a profile was slow: the profiles were listed one after the other before the question
+  appeared (with nothing on screen), each extension was uninstalled by a separate start of VS Code's command line, and the tree
+  listed the profile again afterwards. Now the profile is listed first (and the others only when something may have to be
+  protected, all at once), a progress message shows at once, all the extensions go in one run of the command line, and the tree
+  drops them from the list it already has. With three extensions the part after the confirmation went from about 2.4 s to 1.1 s on
+  a small scratch setup; more extensions and more profiles gain more.
 - A group inside a profile counted an extension the profile had removed out of its total ("2 of 2 installed"); the group has three, so
   it reads "2 of 3 installed", and the tooltip says which one was removed from the profile (a sync does not install it).
 - The Profiles tree kept showing a profile's old list of extensions after something was installed into or uninstalled from it: the
