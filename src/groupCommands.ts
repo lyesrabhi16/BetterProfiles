@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type { BetterProfilesApi, PromptUi } from './api';
+import type { BetterProfilesApi, PickItem, PromptUi } from './api';
 import {
 	CliInvocation,
 	DEFAULT_PROFILE_NAME,
@@ -25,10 +25,13 @@ import {
 	commonToAllProfiles,
 	desiredExtensions,
 	emptyGroups,
+	groupsContaining,
+	isExtensionId,
 	parseGroups,
 	planCleanup,
 	planSync,
 	promptKey,
+	removeFromGroup,
 	renderMatrix,
 	serializeGroups,
 	setTriggers,
@@ -131,30 +134,18 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return resolved;
 	}
 
-	async function pickProfile(placeHolder: string, options: { includeAll?: boolean } = {}): Promise<string | undefined> {
+	async function pickProfile(title: string, options: { includeAll?: boolean } = {}): Promise<string | undefined> {
 		const current = (await api.getCurrentProfile())?.name;
-		const items: (vscode.QuickPickItem & { value: string })[] = (await profileNames()).map(name => ({
-			label: name,
-			description: name === current ? 'current' : undefined,
-			value: name,
-		}));
+		const items: PickItem[] = (await profileNames()).map(name => ({ id: name, label: name, description: name === current ? 'current' : undefined }));
 		if (options.includeAll) {
-			items.unshift({ label: '$(globe) All profiles', description: 'groups applied to every profile', value: ALL_PROFILES });
+			items.unshift({ id: ALL_PROFILES, label: '$(globe) All profiles', description: 'groups applied to every profile' });
 		}
-		return (await vscode.window.showQuickPick(items, { placeHolder }))?.value;
+		return ui.pickOne(title, items);
 	}
 
-	async function pickGroup(config: GroupsConfig, placeHolder: string, options: { allowNew?: boolean } = {}): Promise<string | undefined> {
-		const NEW = '$(add) New group…';
-		const items: vscode.QuickPickItem[] = Object.keys(config.groups).map(name => ({ label: name, description: `${config.groups[name].length} extensions` }));
-		if (options.allowNew) {
-			items.push({ label: NEW });
-		}
-		const choice = await vscode.window.showQuickPick(items, { placeHolder });
-		if (choice?.label !== NEW) {
-			return choice?.label;
-		}
-		return vscode.window.showInputBox({ prompt: 'Name of the new group', validateInput: v => (v.trim() ? undefined : 'A group name is required.') });
+	async function pickGroup(config: GroupsConfig, title: string, options: { allowNew?: boolean } = {}): Promise<string | undefined> {
+		const items: PickItem[] = Object.keys(config.groups).map(name => ({ id: name, label: name, description: `${config.groups[name].length} extensions` }));
+		return ui.pickOne(title, items, options.allowNew ? { newItem: { label: '$(add) New group…', prompt: 'Name of the new group' } } : undefined);
 	}
 
 	const withProgress = <T>(title: string, task: () => Promise<T>) =>
@@ -213,6 +204,117 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		await saveGroups(file, next);
 		void vscode.window.showInformationMessage(`"${profile === ALL_PROFILES ? 'All profiles' : profile}" now gets the group "${group}". Run "Sync Profile With Its Groups" to install it.`);
 		return next;
+	};
+
+	// ---- commands for the gear menu of an extension in the Extensions view (menu "extension/context") ------------
+	// VS Code calls them with the extension's id, then an object about it. A test (or another extension) can instead
+	// pass one object that also carries the answers, so nothing needs to be asked.
+
+	const extensionIdOf = (target: unknown): string => {
+		const id = typeof target === 'string' ? target : (target as { id?: unknown } | null | undefined)?.id;
+		if (typeof id !== 'string' || !isExtensionId(id)) {
+			throw new Error(`"${String(id)}" is not a valid extension id (expected publisher.name).`);
+		}
+		return id;
+	};
+	const optionsOf = <T extends object>(target: unknown): Partial<T> => (typeof target === 'object' && target !== null ? target as Partial<T> : {});
+
+	const extensionAddToGroup = async (target: unknown): Promise<GroupsConfig | undefined> => {
+		const id = extensionIdOf(target);
+		const { config, file } = await loadGroups();
+		const group = optionsOf<{ group: string }>(target).group ?? await pickGroup(config, `Add ${id} to which group?`, { allowNew: true });
+		if (group === undefined) {
+			return undefined;
+		}
+		if (groupsContaining(config, id).includes(group)) {
+			void vscode.window.showInformationMessage(`${id} is already in "${group}".`);
+			return config;
+		}
+		const next = addToGroup(config, group, [id]);
+		await saveGroups(file, next);
+		void vscode.window.showInformationMessage(`Added ${id} to "${group.trim()}". Run "Sync Profile With Its Groups" to install the group where it is missing.`);
+		return next;
+	};
+
+	const extensionRemoveFromGroup = async (target: unknown): Promise<GroupsConfig | undefined> => {
+		const id = extensionIdOf(target);
+		const { config, file } = await loadGroups();
+		const holders = groupsContaining(config, id);
+		if (holders.length === 0) {
+			void vscode.window.showInformationMessage(`${id} is not in any group.`);
+			return config;
+		}
+		const named = optionsOf<{ groups: string[] }>(target).groups;
+		let chosen: string[];
+		if (named) {
+			const notHolding = named.find(group => !holders.includes(group));
+			if (notHolding !== undefined) {
+				throw new Error(`${id} is not in the group "${notHolding}".`);
+			}
+			chosen = named;
+		} else {
+			const picked = await ui.pickMany(`Remove ${id} from which groups?`, holders.map(group => ({ id: group, label: group })));
+			if (!picked?.length) {
+				return undefined;
+			}
+			chosen = holders.filter(group => picked.includes(group));
+		}
+		const next = chosen.reduce((updated, group) => removeFromGroup(updated, group, id), config);
+		await saveGroups(file, next);
+		void vscode.window.showInformationMessage(`Removed ${id} from ${chosen.map(g => `"${g}"`).join(', ')}. Nothing was uninstalled.`);
+		return next;
+	};
+
+	const extensionInstallInProfiles = async (target: unknown): Promise<{ id: string; results: { profile: string; ok: boolean; message: string }[]; alreadyHad: string[] } | undefined> => {
+		const id = extensionIdOf(target);
+		const named = optionsOf<{ profiles: string[] }>(target).profiles;
+		const names = await profileNames();
+		const unknown = named?.find(profile => !names.includes(profile));
+		if (unknown !== undefined) {
+			throw new Error(`Unknown profile "${unknown}". VS Code has: ${names.join(', ')}.`);
+		}
+		const cli = resolveCliOrThrow();
+
+		const has = new Map<string, boolean>();
+		await withProgress(`Looking for ${id} in every profile…`, async () => {
+			for (const name of names) {
+				has.set(name, (await listExtensions(cli, run, name)).some(e => lower(e.id) === lower(id)));
+			}
+		});
+		const alreadyHad = names.filter(name => has.get(name));
+		const lacking = names.filter(name => !has.get(name));
+		if (lacking.length === 0) {
+			void vscode.window.showInformationMessage(`${id} is already in every profile.`);
+			return { id, results: [], alreadyHad };
+		}
+
+		let targets: string[];
+		if (named) {
+			targets = named.filter(profile => lacking.includes(profile));
+		} else {
+			const picked = await ui.pickMany(`Install ${id} into which profiles?`, lacking.map(name => ({ id: name, label: name })));
+			if (!picked?.length) {
+				return undefined;
+			}
+			targets = lacking.filter(name => picked.includes(name));
+		}
+
+		const results = await withProgress(`Installing ${id}…`, async () => {
+			const done: { profile: string; ok: boolean; message: string }[] = [];
+			for (const profile of targets) {
+				const result = await installExtension(cli, run, id, profile);
+				if (!result.ok) {
+					log.error(`${id} -> ${profile}: ${result.message}`);
+				}
+				done.push({ profile, ok: result.ok, message: result.message });
+			}
+			return done;
+		});
+		const failed = results.filter(r => !r.ok);
+		void (failed.length === 0
+			? vscode.window.showInformationMessage(results.length > 0 ? `Installed ${id} into ${results.map(r => `"${r.profile}"`).join(', ')}.` : `${id} is already in the profiles you named.`)
+			: vscode.window.showWarningMessage(`Could not install ${id} into ${failed.map(r => `"${r.profile}"`).join(', ')}.`, 'Show Log').then(choice => choice && log.show()));
+		return { id, results, alreadyHad };
 	};
 
 	const setGroupTriggersCommand = async (args?: { group?: string; patterns?: string[] }): Promise<GroupsConfig | undefined> => {
@@ -502,6 +604,9 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			logged('better-profiles.syncProfile', syncProfile),
 			logged('better-profiles.resetPrompts', resetPrompts),
 			logged('better-profiles.setGroupTriggers', setGroupTriggersCommand),
+			logged('better-profiles.extensionAddToGroup', extensionAddToGroup),
+			logged('better-profiles.extensionRemoveFromGroup', extensionRemoveFromGroup),
+			logged('better-profiles.extensionInstallInProfiles', extensionInstallInProfiles),
 		],
 		checkSync,
 		resetPrompts,

@@ -96,6 +96,22 @@ The groups live in one file shared by every profile (VS Code settings are per pr
 Extensions VS Code installs once for all profiles ("application scoped") count as present everywhere, and they
 show up in every column of the comparison.
 
+### From an extension's gear menu
+
+In the Extensions view, the gear menu of an installed extension (and its right-click menu) has three more entries, in
+their own group just under **Apply Extension to all Profiles**. They act on the extension you opened the menu for, and
+they are not in the Command Palette because they need an extension to act on.
+
+| Entry | What it does |
+|---|---|
+| **Add to Better Profiles Group…** | Pick a group, or type a name to start one, and the extension is added to it. |
+| **Remove from Better Profiles Group…** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. |
+| **Install in Other Profiles…** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
+
+They show for installed extensions that are not built into VS Code. "Install in Other Profiles…" asks the command line
+about every profile first, so an extension that every profile already has (application scoped) gets a message and
+nothing else.
+
 ### Staying in sync
 
 Shortly after startup, and whenever you save the groups file, Better Profiles checks whether this window's profile

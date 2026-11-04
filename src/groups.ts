@@ -301,11 +301,20 @@ export function triggeredGroups(config: GroupsConfig, profile: string): { group:
 }
 
 /** The groups that contain an extension (ids compare case-insensitively), in the order of the file. */
-export function groupsContaining(_config: GroupsConfig, _id: string): string[] {
-	throw new Error('not implemented');
+export function groupsContaining(config: GroupsConfig, id: string): string[] {
+	const key = id.toLowerCase();
+	return Object.keys(config.groups).filter(group => config.groups[group].some(existing => existing.toLowerCase() === key));
 }
 
 /** Takes an extension out of one group. Nothing else changes; in particular nothing is uninstalled. */
-export function removeFromGroup(_config: GroupsConfig, _group: string, _id: string): GroupsConfig {
-	throw new Error('not implemented');
+export function removeFromGroup(config: GroupsConfig, group: string, id: string): GroupsConfig {
+	if (!has(config.groups, group)) {
+		throw new Error(`There is no group "${group}".`);
+	}
+	const key = id.toLowerCase();
+	const kept = config.groups[group].filter(existing => existing.toLowerCase() !== key);
+	if (kept.length === config.groups[group].length) {
+		return config;
+	}
+	return { ...config, groups: { ...config.groups, [group]: kept } };
 }

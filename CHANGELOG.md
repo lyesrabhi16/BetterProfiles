@@ -21,6 +21,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Three entries in the Extensions view gear menu (the `extension/context` menu, next to "Apply Extension to all Profiles"):
+  `Add to Better Profiles Group…`, `Remove from Better Profiles Group…` and `Install in Other Profiles…`. Removing from a
+  group never uninstalls anything, and installing only offers profiles that lack the extension.
 - Development: `flake.nix` with a default and a headless dev shell, and install / run-from-source / test instructions in the README.
 - Install when needed: a group can have workspace triggers (globs such as `**/pubspec.yaml`). The automatic check
   only offers a triggered group in a workspace that matches one of its patterns, names the group in the notification,

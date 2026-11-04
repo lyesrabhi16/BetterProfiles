@@ -60,6 +60,18 @@
         "command": "better-profiles.setGroupTriggers",
         "title": "Set Workspace Triggers For A Group…",
         "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.extensionAddToGroup",
+        "title": "Add to Better Profiles Group…"
+      },
+      {
+        "command": "better-profiles.extensionRemoveFromGroup",
+        "title": "Remove from Better Profiles Group…"
+      },
+      {
+        "command": "better-profiles.extensionInstallInProfiles",
+        "title": "Install in Other Profiles…"
       }
     ],
     "configuration": {
@@ -118,6 +130,39 @@
           "markdownDescription": "Extension ids (`publisher.name`) that are never offered for uninstalling, even when no group mentions them."
         }
       }
+    },
+    "menus": {
+      "extension/context": [
+        {
+          "command": "better-profiles.extensionAddToGroup",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false",
+          "group": "2_profiles@1"
+        },
+        {
+          "command": "better-profiles.extensionRemoveFromGroup",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false",
+          "group": "2_profiles@2"
+        },
+        {
+          "command": "better-profiles.extensionInstallInProfiles",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false",
+          "group": "2_profiles@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "better-profiles.extensionAddToGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.extensionRemoveFromGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.extensionInstallInProfiles",
+          "when": "false"
+        }
+      ]
     }
   },
   "scripts": {
