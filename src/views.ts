@@ -32,9 +32,9 @@ export type Node =
 
 const GROUPS_VIEW = 'betterProfiles.groups';
 const PROFILES_VIEW = 'betterProfiles.profiles';
-// "application/vnd.code.tree.<tree id in lower case>" is the mime type VS Code gives the items dragged out of a tree
-const GROUPS_MIME = 'application/vnd.code.tree.betterprofiles.groups';
-const PROFILES_MIME = 'application/vnd.code.tree.betterprofiles.profiles';
+// What our drags carry. It must not be "application/vnd.code.tree.<tree id>": VS Code puts its own entry ({id, itemHandles})
+// under that name, and in a drop from one tree onto the other our entry sits beside it and `get` returns VS Code's.
+const SOURCES_MIME = 'application/vnd.better-profiles.sources';
 
 /** An extension as VS Code's Extensions list shows it: its icon image and its display name; the id when it is not found. */
 function extensionItem(id: string, info: ExtensionInfo | undefined, contextValue: string): vscode.TreeItem {
@@ -324,13 +324,13 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 		}
 	}
 
-	const controller = (selfMime: string): vscode.TreeDragAndDropController<Node> => ({
-		dragMimeTypes: [selfMime],
-		dropMimeTypes: [GROUPS_MIME, PROFILES_MIME],
+	const controller = (): vscode.TreeDragAndDropController<Node> => ({
+		dragMimeTypes: [SOURCES_MIME],
+		dropMimeTypes: [SOURCES_MIME],
 		handleDrag(nodes, transfer) {
 			const sources = nodes.map(sourceOf).filter((s): s is DragSource => s !== undefined);
 			if (sources.length > 0) {
-				transfer.set(selfMime, new vscode.DataTransferItem(sources));
+				transfer.set(SOURCES_MIME, new vscode.DataTransferItem(sources));
 			}
 		},
 		async handleDrop(node, transfer) {
@@ -338,7 +338,9 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 			if (!target) {
 				return;
 			}
-			const sources = (await Promise.all([GROUPS_MIME, PROFILES_MIME].map(mime => sourcesFrom(transfer.get(mime))))).flat();
+			const items: vscode.DataTransferItem[] = [];
+			transfer.forEach((item, mime) => mime === SOURCES_MIME && items.push(item)); // every entry: one may be an empty placeholder
+			const sources = (await Promise.all(items.map(sourcesFrom))).flat();
 			try {
 				for (const operation of planDrop(sources, target)) {
 					await execute(operation);
@@ -350,8 +352,8 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 		},
 	});
 
-	const groupsDnd = controller(GROUPS_MIME);
-	const profilesDnd = controller(PROFILES_MIME);
+	const groupsDnd = controller();
+	const profilesDnd = controller();
 
 	const nodeOf = <K extends Node['kind']>(arg: unknown, kind: K): Extract<Node, { kind: K }> => {
 		if ((arg as Node | undefined)?.kind !== kind) {

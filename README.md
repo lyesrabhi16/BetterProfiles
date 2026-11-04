@@ -238,8 +238,9 @@ Every command also accepts arguments, so it can be driven without prompts (see `
   remote window it would run on the remote side, where VS Code's local profile records are not available: expect the
   `Profile` label there. Whether `["ui", "workspace"]` would let it run on the local side instead, and so see them, has
   not been tried.
-- Drag and drop is tested with real `DataTransfer` objects handed to the drop handlers, not with a mouse: the virtual display used
-  for testing cannot drive VS Code's own drag and drop either (dragging a file onto a folder in the Explorer failed the same way).
+- Drag and drop is tested with `DataTransfer` objects handed to the drop handlers, including one shaped like what VS Code delivers
+  for a drop from one tree onto the other. A real drag was also driven once through Chromium's debugging protocol (xdotool cannot
+  start a drag on the virtual display): a profile's extension onto a group, and a group onto a profile.
 - The startup timer of the automatic check is not covered by the tests (they call `checkSync()` directly, because a
   timer would race with them). The notification and the checkbox list were checked on screen in a scratch VS Code.
 - Whether a window already open in a profile picks up extensions installed into it by a sync without a reload is
