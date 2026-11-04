@@ -21,6 +21,8 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- In the Better Profiles tab, a profile lists the groups it follows first, each with the group's extensions that the profile has
+  ("2 of 3 installed"), then the extensions that are in none of those groups.
 - Profiles in the Better Profiles tab show their own icon (the one set in VS Code) when they have a valid one.
 - Extensions in the Better Profiles tab are shown like in VS Code's Extensions list: their icon image and display name (localised names
   resolved), the publisher or version beside them, and the id and description in the tooltip. Read from each extension's own folder, so

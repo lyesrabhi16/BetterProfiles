@@ -103,7 +103,9 @@ An icon in the Activity Bar opens two trees:
 
 - **Groups**: every group, how many extensions it has and which profiles follow it. Expand one to see its extensions.
 - **Profiles**: Default and every profile, each with its own icon when it has one and the current one marked. Expanding a profile asks VS Code's command line what it
-  has, once; **Refresh** asks again.
+  has, once; **Refresh** asks again. Inside a profile come first the groups it follows (a group given to all profiles included), each
+  marked "2 of 3 installed" and listing the group's extensions that the profile has; the tooltip names what is missing. After
+  them come the extensions that are in none of those groups. An extension of two followed groups shows under both.
 
 Extensions are shown the way VS Code's own Extensions list shows them: the icon image and the display name, with the
 publisher (in a group) or the version (in a profile) beside it, and the id and description in the tooltip. They are read from
@@ -118,6 +120,9 @@ Drag and drop works between the two trees and inside them:
 | an extension | a group | it is added to that group (a copy: the group it came from keeps it) |
 | an extension | a profile | it is installed into that profile, if the profile does not have it |
 | a group | a profile | the profile follows the group |
+
+The groups and extensions inside a profile drag like their counterparts in the Groups tree, and dropping on them counts as
+dropping on the profile.
 
 **Dropping never removes or uninstalls anything.** The buttons and context menus add **New Group**, **Delete Group**
 (it asks first, and the extensions stay installed), **Remove From Group** (nothing is uninstalled), **Sync Profile With Its

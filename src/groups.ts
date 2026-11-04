@@ -346,3 +346,35 @@ export function removeGroup(config: GroupsConfig, group: string): GroupsConfig {
 	const triggers = Object.fromEntries(Object.entries(oldTriggers ?? {}).filter(([name]) => name !== group));
 	return Object.keys(triggers).length > 0 ? { ...rest, groups, profiles, triggers } : { ...rest, groups, profiles };
 }
+
+export interface ProfileGroupLayout {
+	name: string;
+	/** The group's extensions that the profile has, with the id as the profile reports it. */
+	installed: string[];
+	/** How many extensions the group has in all. */
+	total: number;
+}
+
+/**
+ * How a profile's extensions are laid out for display: the groups it follows first, each with the group's
+ * extensions that the profile has, then the extensions that are in none of those groups. Ids compare without
+ * regard to case. Groups the file names for the profile but does not define are left out.
+ */
+export function profileLayout(config: GroupsConfig, profile: string, installedIds: readonly string[]): { groups: ProfileGroupLayout[]; others: string[] } {
+	const byLowerCase = new Map(installedIds.map(id => [id.toLowerCase(), id]));
+	const inGroups = new Set<string>();
+	const groups: ProfileGroupLayout[] = [];
+	for (const name of assignedGroups(config, profile)) {
+		if (!has(config.groups, name)) {
+			continue;
+		}
+		const members = config.groups[name].map(id => id.toLowerCase());
+		const installed = members.flatMap(id => byLowerCase.get(id) ?? []);
+		members.forEach(id => inGroups.add(id));
+		groups.push({ name, installed: [...new Set(installed)], total: members.length });
+	}
+	const others = installedIds
+		.filter(id => !inGroups.has(id.toLowerCase()))
+		.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()) || a.localeCompare(b));
+	return { groups, others };
+}

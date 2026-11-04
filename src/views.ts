@@ -4,7 +4,7 @@ import { ExtensionCatalog, ExtensionInfo } from './catalog';
 import { CliInvocation, InstalledExtension, Runner, installExtension, listExtensions } from './cli';
 import { DragSource, DropOperation, DropTarget, planDrop } from './dnd';
 import { Profile, profileIcon } from './profiles';
-import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profilesFollowing, removeFromGroup, removeGroup } from './groups';
+import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profileLayout, profilesFollowing, removeFromGroup, removeGroup } from './groups';
 
 /** What the trees need from the group commands: the groups file, the profile names and the command line. */
 export interface ViewsCore {
@@ -25,6 +25,8 @@ export type Node =
 	| { kind: 'group'; name: string }
 	| { kind: 'groupExtension'; group: string; id: string }
 	| { kind: 'profile'; name: string }
+	| { kind: 'profileGroup'; profile: string; name: string }
+	| { kind: 'profileGroupExtension'; profile: string; group: string; id: string; version?: string }
 	| { kind: 'profileExtension'; profile: string; id: string; version?: string }
 	| { kind: 'message'; text: string };
 
@@ -137,16 +139,33 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 		if (!node) {
 			return (await this.core.profileNames()).map(name => ({ kind: 'profile', name }));
 		}
-		if (node.kind !== 'profile') {
+		if (node.kind !== 'profile' && node.kind !== 'profileGroup') {
 			return [];
 		}
+		const profile = node.kind === 'profile' ? node.name : node.profile;
 		try {
-			const extensions = await this.extensionsOf(node.name);
-			return [...extensions]
-				.sort((a, b) => a.id.toLowerCase().localeCompare(b.id.toLowerCase()))
-				.map(e => ({ kind: 'profileExtension', profile: node.name, id: e.id, version: e.version }));
+			const extensions = await this.extensionsOf(profile);
+			const versions = new Map(extensions.map(e => [e.id, e.version]));
+			const layout = profileLayout(await this.groupsConfig(), profile, extensions.map(e => e.id));
+			if (node.kind === 'profileGroup') {
+				const group = layout.groups.find(candidate => candidate.name === node.name);
+				return (group?.installed ?? []).map(id => ({ kind: 'profileGroupExtension', profile, group: node.name, id, version: versions.get(id) }));
+			}
+			return [
+				...layout.groups.map((group): Node => ({ kind: 'profileGroup', profile, name: group.name })),
+				...layout.others.map((id): Node => ({ kind: 'profileExtension', profile, id, version: versions.get(id) })),
+			];
 		} catch (error) {
 			return [message(errorText(error))];
+		}
+	}
+
+	/** The groups, or none when the file cannot be read: the profile's extensions still show, just ungrouped. */
+	private async groupsConfig(): Promise<GroupsConfig> {
+		try {
+			return (await this.core.loadGroups()).config;
+		} catch {
+			return { groups: {}, profiles: {} };
 		}
 	}
 
@@ -161,14 +180,35 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 				item.iconPath = new vscode.ThemeIcon((own && profileIcon(own)) ?? 'account');
 				return item;
 			}
+			case 'profileGroup': {
+				const layout = profileLayout(await this.groupsConfig(), node.profile, (await this.extensionsOf(node.profile)).map(e => e.id));
+				const group = layout.groups.find(candidate => candidate.name === node.name);
+				const have = group?.installed.length ?? 0;
+				const total = group?.total ?? 0;
+				const item = new vscode.TreeItem(node.name, have > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+				item.description = `${have} of ${total} installed`;
+				item.contextValue = 'profileGroup';
+				item.iconPath = new vscode.ThemeIcon('package');
+				item.tooltip = have === total
+					? `${node.profile} has every extension of "${node.name}".`
+					: `${node.profile} lacks ${(await this.missingFrom(node.name, group?.installed ?? [])).join(', ')}. Sync the profile to install it.`;
+				return item;
+			}
+			case 'profileGroupExtension':
 			case 'profileExtension': {
-				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version), 'profileExtension');
+				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version), node.kind);
 				item.description = node.version;
 				return item;
 			}
 			default:
 				return messageItem(node);
 		}
+	}
+
+	/** The extensions of a group that a profile does not have. */
+	private async missingFrom(group: string, installed: readonly string[]): Promise<string[]> {
+		const have = new Set(installed.map(id => id.toLowerCase()));
+		return ((await this.groupsConfig()).groups[group] ?? []).filter(id => !have.has(id.toLowerCase()));
 	}
 }
 
@@ -184,6 +224,8 @@ function sourceOf(node: Node): DragSource | undefined {
 	switch (node.kind) {
 		case 'group': return { kind: 'group', name: node.name };
 		case 'groupExtension': return { kind: 'extension', id: node.id, from: { type: 'group', name: node.group } };
+		case 'profileGroup': return { kind: 'group', name: node.name };
+		case 'profileGroupExtension':
 		case 'profileExtension': return { kind: 'extension', id: node.id, from: { type: 'profile', name: node.profile } };
 		default: return undefined;
 	}
@@ -223,6 +265,8 @@ function targetOf(node: Node | undefined): DropTarget | undefined {
 		case 'group': return { kind: 'group', name: node.name };
 		case 'groupExtension': return { kind: 'group', name: node.group };
 		case 'profile': return { kind: 'profile', name: node.name };
+		case 'profileGroup':
+		case 'profileGroupExtension':
 		case 'profileExtension': return { kind: 'profile', name: node.profile };
 		default: return undefined;
 	}
