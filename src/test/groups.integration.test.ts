@@ -227,20 +227,22 @@ suite('Extension groups against a fake CLI', () => {
 		pickOne?: (title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }) => string | undefined;
 		pickMany?: (title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }) => string[] | undefined;
 		confirm?: (message: string, detail: string, action: string) => boolean;
+		input?: (prompt: string) => string | undefined;
 	}
 
 	let api: BetterProfilesApi;
 	let restoreUi: () => void = () => { };
-	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], confirm: [] as { message: string; detail: string; action: string }[] };
+	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], confirm: [] as { message: string; detail: string; action: string }[], input: [] as string[] };
 
 	/** Answers the extension's questions from a script; anything unscripted is declined. */
 	function answer(script: Script) {
-		seen.ask.length = seen.pickOne.length = seen.pickMany.length = seen.confirm.length = 0;
-		const original = { ask: api.ui.ask, pickOne: api.ui.pickOne, pickMany: api.ui.pickMany, confirm: api.ui.confirm };
+		seen.ask.length = seen.pickOne.length = seen.pickMany.length = seen.confirm.length = seen.input.length = 0;
+		const original = { ask: api.ui.ask, pickOne: api.ui.pickOne, pickMany: api.ui.pickMany, confirm: api.ui.confirm, input: api.ui.input };
 		api.ui.ask = async (message, ...buttons) => { seen.ask.push({ message, buttons }); return script.ask?.(message, buttons); };
 		api.ui.pickOne = async (title, items, options) => { seen.pickOne.push({ title, items, options }); return script.pickOne?.(title, items, options); };
 		api.ui.pickMany = async (title, items, options) => { seen.pickMany.push({ title, items, options }); return script.pickMany?.(title, items, options); };
 		api.ui.confirm = async (message, detail, action) => { seen.confirm.push({ message, detail, action }); return script.confirm?.(message, detail, action) ?? false; };
+		api.ui.input = async prompt => { seen.input.push(prompt); return script.input?.(prompt); };
 		restoreUi = () => Object.assign(api.ui, original);
 	}
 
@@ -1464,11 +1466,46 @@ suite('Extension groups against a fake CLI', () => {
 		});
 
 		suite('commands on the trees', () => {
-			test('New Group creates an empty group, and leaves an existing one alone', async () => {
-				await exec('better-profiles.view.newGroup', { name: 'fresh' });
+			test('New Group asks for the name and creates an empty group', async () => {
+				answer({ input: () => 'fresh' });
+				await exec('better-profiles.view.newGroup');
+				assert.strictEqual(seen.input.length, 1);
 				assert.deepStrictEqual(readGroups().groups.fresh, []);
-				await exec('better-profiles.view.newGroup', { name: 'web' });
+			});
+
+			test('New Group asks even when a group is focused in the tree: VS Code passes the focused item to a button in the title bar', async () => {
+				answer({ input: () => 'fresh' });
+				await exec('better-profiles.view.newGroup', group('web'));
+				assert.strictEqual(seen.input.length, 1, 'the name must be asked for, never taken from the focused group');
+				assert.deepStrictEqual(readGroups().groups.fresh, []);
 				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
+			});
+
+			test('New Group asks even when the focused item is an extension or a profile', async () => {
+				answer({ input: () => 'fresh' });
+				await exec('better-profiles.view.newGroup', profileExt('Python', 'p.installed'));
+				await exec('better-profiles.view.newGroup', profile('Agents'));
+				assert.strictEqual(seen.input.length, 2);
+			});
+
+			test('New Group does nothing when the name prompt is cancelled', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				answer({ input: () => undefined });
+				await exec('better-profiles.view.newGroup', group('web'));
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+			});
+
+			test('New Group leaves an existing group alone and says so', async () => {
+				answer({ input: () => 'web' });
+				await exec('better-profiles.view.newGroup');
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
+			});
+
+			test('New Group can be given the name by a program', async () => {
+				answer({});
+				await exec('better-profiles.view.newGroup', { groupName: 'scripted' });
+				assert.deepStrictEqual(readGroups().groups.scripted, []);
+				assert.strictEqual(seen.input.length, 0);
 			});
 
 			test('Remove From Group takes the extension out of that group only, and uninstalls nothing', async () => {
