@@ -232,17 +232,18 @@ suite('Extension groups against a fake CLI', () => {
 
 	let api: BetterProfilesApi;
 	let restoreUi: () => void = () => { };
-	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], confirm: [] as { message: string; detail: string; action: string }[], input: [] as string[] };
+	const seen = { pickOne: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], ask: [] as { message: string; buttons: string[] }[], pickMany: [] as { title: string; items: PickItem[]; options?: { newItem?: { label: string; prompt: string } } }[], confirm: [] as { message: string; detail: string; action: string }[], input: [] as string[], opened: [] as string[] };
 
 	/** Answers the extension's questions from a script; anything unscripted is declined. */
 	function answer(script: Script) {
-		seen.ask.length = seen.pickOne.length = seen.pickMany.length = seen.confirm.length = seen.input.length = 0;
-		const original = { ask: api.ui.ask, pickOne: api.ui.pickOne, pickMany: api.ui.pickMany, confirm: api.ui.confirm, input: api.ui.input };
+		seen.ask.length = seen.pickOne.length = seen.pickMany.length = seen.confirm.length = seen.input.length = seen.opened.length = 0;
+		const original = { ask: api.ui.ask, pickOne: api.ui.pickOne, pickMany: api.ui.pickMany, confirm: api.ui.confirm, input: api.ui.input, openExtension: api.ui.openExtension };
 		api.ui.ask = async (message, ...buttons) => { seen.ask.push({ message, buttons }); return script.ask?.(message, buttons); };
 		api.ui.pickOne = async (title, items, options) => { seen.pickOne.push({ title, items, options }); return script.pickOne?.(title, items, options); };
 		api.ui.pickMany = async (title, items, options) => { seen.pickMany.push({ title, items, options }); return script.pickMany?.(title, items, options); };
 		api.ui.confirm = async (message, detail, action) => { seen.confirm.push({ message, detail, action }); return script.confirm?.(message, detail, action) ?? false; };
 		api.ui.input = async prompt => { seen.input.push(prompt); return script.input?.(prompt); };
+		api.ui.openExtension = async id => { seen.opened.push(id); };
 		restoreUi = () => Object.assign(api.ui, original);
 	}
 
@@ -1035,7 +1036,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		suite('contributions', () => {
 			const contributes = () => vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
-			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup'].map(c => `better-profiles.view.${c}`);
+			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup', 'clickExtension', 'openExtension', 'copyExtensionId', 'addExtensionToGroup', 'installExtensionInProfiles'].map(c => `better-profiles.view.${c}`);
 
 			test('an activity bar container called Better Profiles with a Groups and a Profiles view', () => {
 				const containers: { id: string; title: string; icon: string }[] = contributes().viewsContainers?.activitybar ?? [];
@@ -1063,6 +1064,44 @@ suite('Extension groups against a fake CLI', () => {
 				assert.ok(whenOf('better-profiles.view.deleteGroup').includes('viewItem == group'));
 				assert.ok(whenOf('better-profiles.view.removeFromGroup').includes('viewItem == groupExtension'));
 				assert.ok(whenOf('better-profiles.view.syncProfile').includes('viewItem == profile'));
+			});
+
+			test('every kind of item has a right-click menu with what it can do', () => {
+				const entries: { command: string; when: string }[] = contributes().menus?.['view/item/context'] ?? [];
+				const menuOf = (kind: string) => entries.filter(e => new RegExp(`viewItem (==|=~) .*\\b${kind}\\b`).test(e.when) || e.when.includes(`viewItem == ${kind}`)).map(e => e.command.replace('better-profiles.view.', ''));
+				for (const kind of ['groupExtension', 'profileGroupExtension', 'profileExtension']) {
+					const menu = menuOf(kind);
+					for (const wanted of ['openExtension', 'copyExtensionId', 'addExtensionToGroup', 'installExtensionInProfiles']) {
+						assert.ok(menu.includes(wanted), `${kind} should offer ${wanted}: ${menu.join(', ')}`);
+					}
+				}
+				for (const kind of ['groupExtension', 'profileGroupExtension']) {
+					assert.ok(menuOf(kind).includes('removeFromGroup'), kind + ' can be removed from its group');
+				}
+				assert.ok(!menuOf('profileExtension').includes('removeFromGroup'), 'an ungrouped extension is in no group of this profile');
+				for (const kind of ['group', 'profileGroup']) {
+					const menu = menuOf(kind);
+					for (const wanted of ['assignGroup', 'setTriggers', 'deleteGroup']) {
+						assert.ok(menu.includes(wanted), `${kind} should offer ${wanted}: ${menu.join(', ')}`);
+					}
+				}
+				assert.ok(menuOf('profile').includes('syncProfile'));
+			});
+
+			test('every item kind that a menu names is one that a tree really produces', async () => {
+				const entries: { when: string }[] = contributes().menus?.['view/item/context'] ?? [];
+				const named = new Set(entries.flatMap(e => [...e.when.matchAll(/\b(?:group|profile|groupExtension|profileGroup|profileGroupExtension|profileExtension|message)\b(?=\s*(?:\)|&&|\||$|\/))/g)].map(m => m[0])));
+				const produced = new Set([
+					(await item('groups', group('web'))).contextValue,
+					(await item('groups', groupExt('web', 'a.b'))).contextValue,
+					(await item('profiles', profile('Python'))).contextValue,
+					(await item('profiles', profileGroup('Python', 'web'))).contextValue,
+					(await item('profiles', profileGroupExt('Python', 'web', 'a.b'))).contextValue,
+					(await item('profiles', profileExt('Python', 'p.installed'))).contextValue,
+				]);
+				for (const kind of named) {
+					assert.ok(kind === 'message' || produced.has(kind), `a menu names "${kind}" but no item has it`);
+				}
 			});
 		});
 
@@ -1506,6 +1545,157 @@ suite('Extension groups against a fake CLI', () => {
 				await exec('better-profiles.view.newGroup', { groupName: 'scripted' });
 				assert.deepStrictEqual(readGroups().groups.scripted, []);
 				assert.strictEqual(seen.input.length, 0);
+			});
+
+			suite('opening an extension', () => {
+				const clickCommand = async (view: ViewName, n: Node) => (await item(view, n)).command;
+				const OPEN_MODE = 'workbench.list';
+				const setOpenMode = (value: string | undefined) => vscode.workspace.getConfiguration(OPEN_MODE).update('openMode', value, vscode.ConfigurationTarget.Global);
+				const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+				teardown(() => setOpenMode(undefined));
+
+				test('an extension item runs the click command with itself, in every tree and every place', async () => {
+					for (const [view, n] of [['groups', groupExt('web', 'a.b')], ['profiles', profileGroupExt('Python', 'web', 'a.b')], ['profiles', profileExt('Python', 'p.installed')]] as [ViewName, Node][]) {
+						const command = await clickCommand(view, n);
+						assert.strictEqual(command?.command, 'better-profiles.view.clickExtension', String(n.kind));
+						assert.deepStrictEqual(command?.arguments?.[0], n);
+					}
+				});
+
+				test('groups, profiles and messages do nothing when clicked', async () => {
+					assert.strictEqual(await clickCommand('groups', group('web')), undefined);
+					assert.strictEqual(await clickCommand('profiles', profile('Python')), undefined);
+				});
+
+				test('a double click opens the extension page, a single click does not', async () => {
+					answer({});
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'a.b'));
+					assert.deepStrictEqual(seen.opened, [], 'one click only selects');
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'a.b'));
+					assert.deepStrictEqual(seen.opened, ['a.b']);
+				});
+
+				test('two clicks too far apart are not a double click', async () => {
+					answer({});
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'c.d'));
+					await sleep(700);
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'c.d'));
+					assert.deepStrictEqual(seen.opened, []);
+				});
+
+				test('two clicks on two different items are not a double click', async () => {
+					answer({});
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'x.one'));
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'x.two'));
+					assert.deepStrictEqual(seen.opened, []);
+				});
+
+				test('the same extension in two places is two items: a click on each is not a double click', async () => {
+					answer({});
+					await exec('better-profiles.view.clickExtension', groupExt('web', 'dup.ext'));
+					await exec('better-profiles.view.clickExtension', profileExt('Python', 'dup.ext'));
+					assert.deepStrictEqual(seen.opened, []);
+				});
+
+				test('after a double click the next click starts over', async () => {
+					answer({});
+					for (let i = 0; i < 3; i++) {
+						await exec('better-profiles.view.clickExtension', profileExt('Python', 'p.installed'));
+					}
+					assert.deepStrictEqual(seen.opened, ['p.installed'], 'three quick clicks open it once');
+				});
+
+				test('when VS Code is set to open items on a double click, its own double click is the one that counts', async () => {
+					await setOpenMode('doubleClick');
+					answer({});
+					await exec('better-profiles.view.clickExtension', profileExt('Python', 'p.installed'));
+					assert.deepStrictEqual(seen.opened, ['p.installed']);
+				});
+
+				test('Open Extension Page opens it at once, from any kind of item', async () => {
+					answer({});
+					await exec('better-profiles.view.openExtension', groupExt('web', 'a.b'));
+					await exec('better-profiles.view.openExtension', profileGroupExt('Python', 'web', 'c.d'));
+					await exec('better-profiles.view.openExtension', profileExt('Python', 'p.installed'));
+					assert.deepStrictEqual(seen.opened, ['a.b', 'c.d', 'p.installed']);
+				});
+
+				test('what is not an extension item is refused, and nothing is opened', async () => {
+					answer({});
+					await assert.rejects(exec('better-profiles.view.openExtension', group('web')), /item of the Better Profiles tab/);
+					await assert.rejects(exec('better-profiles.view.clickExtension', undefined), /item of the Better Profiles tab/);
+					assert.deepStrictEqual(seen.opened, []);
+				});
+
+				test('Copy Extension Id puts the id on the clipboard', async () => {
+					await vscode.env.clipboard.writeText('before');
+					await exec('better-profiles.view.copyExtensionId', profileGroupExt('Python', 'web', 'c.d'));
+					assert.strictEqual(await vscode.env.clipboard.readText(), 'c.d');
+				});
+			});
+
+			suite('the right-click commands of an extension', () => {
+				test('Add to Group asks which groups, whatever group the item is in, and adds the extension', async () => {
+					answer({ pickMany: () => ['tools'] });
+					await exec('better-profiles.view.addExtensionToGroup', groupExt('web', 'a.b'));
+					assert.strictEqual(seen.pickMany.length, 1, 'the group of the item must not answer for the user');
+					assert.ok(seen.pickMany[0].title.includes('a.b'));
+					assert.deepStrictEqual(readGroups().groups.tools, ['x.y', 'a.b']);
+					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
+				});
+
+				test('Add to Group works from an extension of a profile, grouped or not', async () => {
+					answer({ pickMany: () => ['empty'] });
+					await exec('better-profiles.view.addExtensionToGroup', profileExt('Python', 'p.installed'));
+					await exec('better-profiles.view.addExtensionToGroup', profileGroupExt('Python', 'web', 'c.d'));
+					assert.deepStrictEqual(readGroups().groups.empty, ['p.installed', 'c.d']);
+				});
+
+				test('Install in Other Profiles asks which profiles and installs the extension there', async () => {
+					answer({ pickMany: () => ['Agents'] });
+					await exec('better-profiles.view.installExtensionInProfiles', profileExt('Python', 'p.installed'));
+					assert.strictEqual(seen.pickMany.length, 1);
+					assert.deepStrictEqual(installs(), [['--install-extension', 'p.installed', '--profile', 'Agents']]);
+				});
+
+				test('Install in Other Profiles also works on an extension of a group', async () => {
+					answer({ pickMany: () => ['Agents'] });
+					await exec('better-profiles.view.installExtensionInProfiles', groupExt('web', 'a.b'));
+					assert.deepStrictEqual(installs(), [['--install-extension', 'a.b', '--profile', 'Agents']]);
+				});
+
+				test('Remove From Group works on an extension shown inside a group of a profile, and uninstalls nothing', async () => {
+					await exec('better-profiles.view.removeFromGroup', profileGroupExt('Python', 'web', 'a.b'));
+					assert.deepStrictEqual(readGroups().groups.web, ['c.d']);
+					assert.deepStrictEqual(calls(), []);
+				});
+
+				test('an item with an invalid extension id is refused', async () => {
+					answer({});
+					await assert.rejects(exec('better-profiles.view.addExtensionToGroup', groupExt('web', '--uninstall-extension')), /not a valid extension id/);
+					assert.deepStrictEqual(calls(), []);
+				});
+			});
+
+			suite('the right-click commands of a group shown inside a profile', () => {
+				test('Delete Group deletes the group itself, after asking', async () => {
+					answer({ confirm: () => true });
+					await exec('better-profiles.view.deleteGroup', profileGroup('Python', 'web'));
+					assert.strictEqual(seen.confirm.length, 1);
+					assert.ok(!('web' in readGroups().groups));
+				});
+
+				test('Delete Group keeps the group when the question is declined', async () => {
+					answer({ confirm: () => false });
+					await exec('better-profiles.view.deleteGroup', profileGroup('Python', 'web'));
+					assert.ok('web' in readGroups().groups);
+				});
+
+				test('Give To A Profile acts on that group', async () => {
+					answer({ pickOne: (_title, items) => items.find(i => i.id === 'Agents')?.id });
+					await exec('better-profiles.view.assignGroup', profileGroup('Python', 'web'));
+					assert.ok((readGroups().profiles.Agents ?? []).includes('web'));
+				});
 			});
 
 			test('Remove From Group takes the extension out of that group only, and uninstalls nothing', async () => {
