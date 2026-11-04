@@ -15,14 +15,11 @@ const installation = process.env.BETTER_PROFILES_VSCODE
 // BETTER_PROFILES_HEADLESS=1 adds the flags needed under Xvfb (no GPU, X11, no sandbox).
 const headless = process.env.BETTER_PROFILES_HEADLESS ? ['--disable-gpu', '--ozone-platform=x11', '--no-sandbox'] : [];
 
-export default defineConfig({
-	files: 'out/test/**/*.test.js',
-	// The folder name has spaces and an accent on purpose: VS Code stores its URI percent-encoded.
-	workspaceFolder: './test-fixtures/workspace é with spaces',
+const common = name => ({
 	...installation,
 	launchArgs: [
-		'--user-data-dir', path.join(scratch, 'user-data'),
-		'--extensions-dir', path.join(scratch, 'extensions'),
+		'--user-data-dir', path.join(scratch, name, 'user-data'),
+		'--extensions-dir', path.join(scratch, name, 'extensions'),
 		'--disable-workspace-trust',
 		'--skip-welcome',
 		'--skip-release-notes',
@@ -30,3 +27,21 @@ export default defineConfig({
 	],
 	mocha: { ui: 'tdd', timeout: 30000 },
 });
+
+// Two runs, each in its own VS Code window: the workspace decides what VS Code records and what can be searched.
+export default defineConfig([
+	{
+		label: 'single folder',
+		files: ['out/test/*.test.js', 'out/test/unit/**/*.test.js'],
+		// The folder name has spaces and an accent on purpose: VS Code stores its URI percent-encoded.
+		workspaceFolder: './test-fixtures/workspace é with spaces',
+		...common('single-folder'),
+	},
+	{
+		label: 'multi-root',
+		files: 'out/test/multiroot/*.test.js',
+		// Two folders, a/ and b/; only b/ contains a pubspec.yaml.
+		workspaceFolder: './test-fixtures/multi-root/multi.code-workspace',
+		...common('multi-root'),
+	},
+]);

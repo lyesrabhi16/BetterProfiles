@@ -164,6 +164,7 @@ Every command also accepts arguments, so it can be driven without prompts (see `
 npm ci
 npm run test:unit      # pure logic, no VS Code needed
 npm test               # also runs inside a real VS Code Extension Host
+                       # (two windows: a single folder, and the two-folder workspace in test-fixtures/multi-root)
 ```
 
 `npm test` downloads VS Code. To use an installed one instead (needed on NixOS), and to run without a display:
