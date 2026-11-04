@@ -46,6 +46,7 @@ several places. Groups let you name a set once and give it to the profiles that 
 | `Better Profiles: Give A Group To A Profile…` | Make a profile (or all of them) follow a group. |
 | `Better Profiles: Compare Extensions Across Profiles` | Opens a table: one row per extension, one column per profile. |
 | `Better Profiles: Sync Profile With Its Groups…` | Installs what a profile is missing (after you confirm), then offers to uninstall what its groups do not mention (you tick what goes). |
+| `Better Profiles: Set Workspace Triggers For A Group…` | Tell a group which files mean "this workspace needs me" (see [Install when needed](#install-when-needed)). |
 | `Better Profiles: Reset Sync Prompts` | Forget "Not now" answers so the prompt below can appear again. |
 | `Better Profiles: Edit Groups File` | Opens the JSON file below. |
 
@@ -83,6 +84,37 @@ has every extension of its groups. What happens next is `betterProfiles.autoSync
 
 Nothing is checked, and no command line is started, for a profile that has no groups, or when the window's
 profile cannot be determined (see Known limits). **The automatic check only ever installs.**
+
+### Install when needed
+
+A group can name the files that show a workspace needs it:
+
+```json
+{
+  "groups": { "flutter": ["dart-code.flutter"], "python": ["ms-python.python"] },
+  "profiles": { "Mobile": ["flutter", "python"] },
+  "triggers": {
+    "flutter": ["**/pubspec.yaml"],
+    "python": ["**/pyproject.toml", "**/requirements.txt"]
+  }
+}
+```
+
+The patterns are globs relative to each workspace folder (no absolute paths, no `..`); `node_modules` and `.git`
+are not searched. A group **without** triggers is always wanted, as before. A group **with** triggers is only wanted
+by the automatic check when one of its patterns matches a file in the open workspace. In the example, opening a
+Flutter project in the "Mobile" profile offers `dart-code.flutter` but not `ms-python.python`; the notification names
+the group it matched, and **Sync** installs exactly what it announced.
+
+The check runs when the window starts, when the workspace folders change, and when you save the groups file. It does
+not watch for matching files appearing later.
+
+Triggers only decide what the *automatic* check offers:
+
+- `Sync Profile With Its Groups…` is an explicit request, so it installs every group of the profile, triggers or not.
+- Cleanup considers all the profile's groups, matched or not. Another workspace may need a group this one does not,
+  so its extensions are never offered for removal just because this workspace does not match. For the same reason
+  nothing tells you an extension is "no longer needed".
 
 ### Uninstalling
 
@@ -146,7 +178,18 @@ Every run uses its own throwaway user-data and extensions directories, so it nev
 The workspace opened by the tests (`test-fixtures/workspace é with spaces`) is named with spaces and an accent on
 purpose: VS Code stores its URI percent-encoded, which is what the old detection got wrong.
 
-## Not built yet
+## What it cannot do: enabling and disabling extensions
 
-Planned, not implemented: enabling extensions only when a workspace needs them. VS Code has no public API for one
-extension to enable or disable another, so this needs a workaround that has not been tried yet.
+"Only activate an extension where it is needed" would mean enabling and disabling other extensions per workspace.
+An extension cannot do that in VS Code 1.119. Checked in the `1.119.0` source of microsoft/vscode:
+
+- Per-extension enable and disable exist only as UI actions (`EnableForWorkspaceAction`, `DisableForWorkspaceAction`
+  and two more in `extensionsActions.ts`). Each holds an `extension` that the menu sets, and `run()` calls an internal service.
+  They are not registered as commands.
+- The only enablement commands in `extensions.contribution.ts` are all-or-nothing:
+  `workbench.extensions.action.enableAll`, `disableAll` and their `…Workspace` variants.
+- `vscode.d.ts` has nothing for it: `Extension<T>` has no enable or disable, and neither does the `extensions` namespace.
+- The command line's `--disable-extension` hides an extension for that launch only.
+
+What is available by extension id is installing and uninstalling, so this extension brings in what a workspace needs
+(see above) and offers to remove what no group wants, and leaves enabling to VS Code's own lazy activation.

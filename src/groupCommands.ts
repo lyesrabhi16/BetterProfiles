@@ -31,6 +31,8 @@ import {
 	promptKey,
 	renderMatrix,
 	serializeGroups,
+	setTriggers,
+	triggeredGroups,
 } from './groups';
 
 export interface SyncReport {
@@ -213,6 +215,32 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return next;
 	};
 
+	const setGroupTriggersCommand = async (args?: { group?: string; patterns?: string[] }): Promise<GroupsConfig | undefined> => {
+		const { config, file } = await loadGroups();
+		const group = args?.group ?? await pickGroup(config, 'Set workspace triggers for which group?');
+		if (group === undefined) {
+			return undefined;
+		}
+		let patterns = args?.patterns;
+		if (patterns === undefined) {
+			const typed = await vscode.window.showInputBox({
+				prompt: `Files that tell ${group} is needed, as globs relative to the workspace folder, separated by commas (empty removes them)`,
+				placeHolder: '**/pubspec.yaml, **/*.dart',
+				value: (config.triggers?.[group] ?? []).join(', '),
+			});
+			if (typed === undefined) {
+				return undefined;
+			}
+			patterns = typed.split(',').map(p => p.trim()).filter(p => p !== '');
+		}
+		const next = setTriggers(config, group, patterns);
+		await saveGroups(file, next);
+		void vscode.window.showInformationMessage(patterns.length > 0
+			? `"${group}" is now offered in workspaces that contain: ${patterns.join(', ')}.`
+			: `"${group}" no longer has workspace triggers.`);
+		return next;
+	};
+
 	const compareProfiles = async (args?: { open?: boolean }): Promise<string> => {
 		const names = await profileNames();
 		const cli = resolveCliOrThrow();
@@ -307,7 +335,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			: vscode.window.showWarningMessage(`${failed.length} of ${results.length} could not be uninstalled from "${profile}": ${failed.map(r => r.id).join(', ')}.`));
 	}
 
-	const syncProfile = async (args?: { profile?: string; confirm?: boolean; uninstall?: UninstallMode }): Promise<SyncReport | undefined> => {
+	const syncProfile = async (args?: { profile?: string; confirm?: boolean; uninstall?: UninstallMode; only?: string[] }): Promise<SyncReport | undefined> => {
 		const names = await profileNames();
 		const profile = args?.profile ?? await pickProfile('Sync which profile with its groups?');
 		if (profile === undefined) {
@@ -322,7 +350,10 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		const cli = resolveCliOrThrow();
 
 		const installed = await withProgress(`Listing the extensions of "${profile}"…`, () => listExtensions(cli, run, profile));
-		const plan = planSync(config, profile, installed.map(e => e.id));
+		const fullPlan = planSync(config, profile, installed.map(e => e.id));
+		// "only" is what the notification announced (the groups this workspace needs); an explicit sync installs all
+		const only = args?.only ? new Set(args.only.map(lower)) : undefined;
+		const plan: SyncPlan = only ? { ...fullPlan, toInstall: fullPlan.toInstall.filter(id => only.has(lower(id))) } : fullPlan;
 		if (plan.missingGroups.length > 0) {
 			void vscode.window.showWarningMessage(`"${profile}" refers to groups that do not exist: ${plan.missingGroups.join(', ')}.`);
 		}
@@ -369,6 +400,24 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	// ---- asking to sync when a profile is out of date ---------------------------------------------------
 
+	/** The triggered groups of this profile for which a pattern matches a file in one of the workspace folders. */
+	async function matchedTriggerGroups(config: GroupsConfig, profile: string): Promise<string[]> {
+		const folders = vscode.workspace.workspaceFolders ?? [];
+		const matched: string[] = [];
+		for (const { group, patterns } of triggeredGroups(config, profile)) {
+			search: for (const folder of folders) {
+				for (const pattern of patterns) {
+					const hits = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, pattern), '**/{node_modules,.git}/**', 1);
+					if (hits.length > 0) {
+						matched.push(group);
+						break search;
+					}
+				}
+			}
+		}
+		return matched;
+	}
+
 	const dismissed = (): Record<string, string> => context.globalState.get<Record<string, string>>(DISMISSED_KEY, {});
 
 	const resetPrompts = async (): Promise<void> => {
@@ -394,18 +443,19 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			}
 			const profile = current.name;
 			const { config } = await loadGroups();
-			if (desiredExtensions(config, profile).ids.length === 0) {
-				return; // nothing to compare against: do not even start the CLI
+			const matched = await matchedTriggerGroups(config, profile);
+			if (desiredExtensions(config, profile, matched).ids.length === 0) {
+				return; // nothing this workspace needs: do not even start the CLI
 			}
 			const cli = resolveCliOrThrow();
 			const installed = await listExtensions(cli, run, profile);
-			const { toInstall } = planSync(config, profile, installed.map(e => e.id));
+			const { toInstall } = planSync(config, profile, installed.map(e => e.id), matched);
 			if (toInstall.length === 0) {
 				return;
 			}
 
 			if (mode === 'auto') {
-				await syncProfile({ profile, confirm: false, uninstall: 'none' });
+				await syncProfile({ profile, confirm: false, uninstall: 'none', only: toInstall });
 				return;
 			}
 			const key = promptKey(toInstall);
@@ -414,11 +464,11 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			}
 			const preview = toInstall.slice(0, 3).join(', ') + (toInstall.length > 3 ? ', …' : '');
 			const answer = await ui.ask(
-				`"${profile}" is missing ${toInstall.length} extension${toInstall.length === 1 ? '' : 's'} from its groups (${preview}).`,
+				`"${profile}" is missing ${toInstall.length} extension${toInstall.length === 1 ? '' : 's'} from its groups (${preview}).${matched.length > 0 ? ` This workspace matches: ${matched.join(', ')}.` : ''}`,
 				'Sync', 'Not now', 'Stop asking',
 			);
 			if (answer === 'Sync') {
-				await syncProfile({ profile, confirm: false, uninstall: 'ask' });
+				await syncProfile({ profile, confirm: false, uninstall: 'ask', only: toInstall });
 			} else if (answer === 'Not now') {
 				await context.globalState.update(DISMISSED_KEY, { ...dismissed(), [profile]: key });
 			} else if (answer === 'Stop asking') {
@@ -451,6 +501,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			logged('better-profiles.compareProfiles', compareProfiles),
 			logged('better-profiles.syncProfile', syncProfile),
 			logged('better-profiles.resetPrompts', resetPrompts),
+			logged('better-profiles.setGroupTriggers', setGroupTriggersCommand),
 		],
 		checkSync,
 		resetPrompts,

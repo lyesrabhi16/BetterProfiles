@@ -86,7 +86,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		// Kept for keybindings and other extensions; the same data as the exported API.
 		vscode.commands.registerCommand('better-profiles.getCurrentProfile', () => api.getCurrentProfile()),
 		vscode.commands.registerCommand('better-profiles.getProfiles', () => api.getProfiles()),
-		vscode.workspace.onDidChangeWorkspaceFolders(() => void refresh()),
+		vscode.workspace.onDidChangeWorkspaceFolders(() => { void refresh(); void groups.checkSync(); }),
 		// A profile can be renamed or re-iconed from another window.
 		vscode.window.onDidChangeWindowState(state => state.focused && void refresh()),
 		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),

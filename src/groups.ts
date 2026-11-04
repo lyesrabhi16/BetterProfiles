@@ -85,6 +85,28 @@ export function parseGroups(text: string): { config: GroupsConfig; warnings: str
 			config.profiles[name] = unique(value.filter((g): g is string => typeof g === 'string'));
 		}
 	}
+	if (isRecord(data.triggers)) {
+		for (const [group, value] of Object.entries(data.triggers)) {
+			if (!Array.isArray(value)) {
+				warnings.push(`Triggers of group "${group}" are not a list of patterns; ignored.`);
+				continue;
+			}
+			const valid: string[] = [];
+			for (const entry of value) {
+				if (typeof entry === 'string' && isTriggerPattern(entry)) {
+					valid.push(entry.trim());
+				} else {
+					warnings.push(`Group "${group}": ${JSON.stringify(entry)} is not a valid trigger pattern (a glob relative to the workspace folder); ignored.`);
+				}
+			}
+			if (!has(config.groups, group)) {
+				warnings.push(`Triggers are set for group "${group}", which does not exist.`);
+			}
+			if (valid.length > 0) {
+				config.triggers = { ...(config.triggers ?? {}), [group]: [...new Set(valid)] };
+			}
+		}
+	}
 	return { config, warnings };
 }
 
@@ -105,6 +127,7 @@ export function addToGroup(config: GroupsConfig, group: string, ids: string[]): 
 	return {
 		groups: { ...config.groups, [name]: unique([...(has(config.groups, name) ? config.groups[name] : []), ...ids]) },
 		profiles: { ...config.profiles },
+		...(config.triggers ? { triggers: config.triggers } : {}),
 	};
 }
 
@@ -121,6 +144,7 @@ export function assignGroup(config: GroupsConfig, profile: string, group: string
 	return {
 		groups: { ...config.groups },
 		profiles: { ...config.profiles, [profileName]: current.includes(groupName) ? current : [...current, groupName] },
+		...(config.triggers ? { triggers: config.triggers } : {}),
 	};
 }
 
@@ -132,15 +156,20 @@ export function assignedGroups(config: GroupsConfig, profile: string): string[] 
 	]);
 }
 
-/** The extensions a profile should have, and the groups it refers to that do not exist. */
-export function desiredExtensions(config: GroupsConfig, profile: string, _matched?: readonly string[]): { ids: string[]; missingGroups: string[] } {
+/**
+ * The extensions a profile should have, and the groups it refers to that do not exist. With `matched` (the
+ * triggered groups this workspace matches), a group that has triggers only counts if it is in that list;
+ * without it every assigned group counts.
+ */
+export function desiredExtensions(config: GroupsConfig, profile: string, matched?: readonly string[]): { ids: string[]; missingGroups: string[] } {
 	const ids: string[] = [];
 	const missingGroups: string[] = [];
 	for (const name of assignedGroups(config, profile)) {
-		if (has(config.groups, name)) {
-			ids.push(...config.groups[name]);
-		} else {
+		if (!has(config.groups, name)) {
 			missingGroups.push(name);
+		} else if (matched === undefined || (config.triggers?.[name]?.length ?? 0) === 0 || matched.includes(name)) {
+			// a group with triggers only counts where the workspace matched one of them
+			ids.push(...config.groups[name]);
 		}
 	}
 	return { ids: unique(ids), missingGroups };
@@ -229,16 +258,44 @@ export function promptKey(ids: string[]): string {
 }
 
 /** A glob relative to a workspace folder. No absolute paths, no "..", no backslashes. */
-export function isTriggerPattern(_text: string): boolean {
-	throw new Error('not implemented');
+export function isTriggerPattern(text: string): boolean {
+	return typeof text === 'string'
+		&& text.trim() !== ''
+		&& text.length <= 200
+		&& !text.includes('\0')
+		&& !text.includes('\\')
+		&& !text.startsWith('/')
+		&& !/^[A-Za-z]:/.test(text)
+		&& !text.split('/').includes('..');
 }
 
+const uniqueExact = (items: string[]): string[] => [...new Set(items)];
+
 /** Replaces the triggers of an existing group; an empty list removes them. */
-export function setTriggers(_config: GroupsConfig, _group: string, _patterns: string[]): GroupsConfig {
-	throw new Error('not implemented');
+export function setTriggers(config: GroupsConfig, group: string, patterns: string[]): GroupsConfig {
+	const name = group.trim();
+	if (!has(config.groups, name)) {
+		throw new Error(`There is no group "${name}".`);
+	}
+	const cleaned = uniqueExact(patterns.map(p => p.trim()));
+	for (const pattern of cleaned) {
+		if (!isTriggerPattern(pattern)) {
+			throw new Error(`"${pattern}" is not a valid trigger pattern (a glob relative to the workspace folder, without ".." and not absolute).`);
+		}
+	}
+	const triggers = { ...(config.triggers ?? {}) };
+	if (cleaned.length > 0) {
+		triggers[name] = cleaned;
+	} else {
+		delete triggers[name];
+	}
+	const { triggers: _old, ...rest } = config;
+	return Object.keys(triggers).length > 0 ? { ...rest, triggers } : rest;
 }
 
 /** The groups this profile follows that have triggers, with their patterns. */
-export function triggeredGroups(_config: GroupsConfig, _profile: string): { group: string; patterns: string[] }[] {
-	throw new Error('not implemented');
+export function triggeredGroups(config: GroupsConfig, profile: string): { group: string; patterns: string[] }[] {
+	return assignedGroups(config, profile)
+		.filter(group => (config.triggers?.[group]?.length ?? 0) > 0)
+		.map(group => ({ group, patterns: config.triggers![group] }));
 }

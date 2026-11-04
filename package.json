@@ -55,6 +55,11 @@
         "command": "better-profiles.resetPrompts",
         "title": "Reset Sync Prompts",
         "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.setGroupTriggers",
+        "title": "Set Workspace Triggers For A Group…",
+        "category": "Better Profiles"
       }
     ],
     "configuration": {
