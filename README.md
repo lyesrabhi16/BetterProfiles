@@ -109,6 +109,10 @@ the group it matched, and **Sync** installs exactly what it announced.
 The check runs when the window starts, when the workspace folders change, and when you save the groups file. It does
 not watch for matching files appearing later.
 
+The search stops at the first match and runs outside the editor process. Measured on a synthetic workspace of 200,000
+files (100,000 of them under `node_modules`), a pattern that matches nothing took about 30 ms, the same as ripgrep on its
+own. Those were warm-cache numbers on an SSD; a cold disk or a far larger repository will take longer.
+
 Triggers only decide what the *automatic* check offers:
 
 - `Sync Profile With Its Groups…` is an explicit request, so it installs every group of the profile, triggers or not.
@@ -152,7 +156,10 @@ Every command also accepts arguments, so it can be driven without prompts (see `
 
 - **Empty windows** cannot be identified, and neither can windows VS Code has not recorded yet. This includes
   Extension Development Host windows, which never record their profile.
-- Remote windows (SSH, WSL, containers) are untested.
+- **Remote windows (SSH, WSL, containers) are untested.** The extension declares `extensionKind: ["workspace", "ui"]`, so in a
+  remote window it would run on the remote side, where VS Code's local profile records are not available: expect the
+  `Profile` label there. Whether `["ui", "workspace"]` would let it run on the local side instead, and so see them, has
+  not been tried.
 - The startup timer of the automatic check is not covered by the tests (they call `checkSync()` directly, because a
   timer would race with them). The notification and the checkbox list were checked on screen in a scratch VS Code.
 - Whether a window already open in a profile picks up extensions installed into it by a sync without a reload is
