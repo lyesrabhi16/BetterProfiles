@@ -147,6 +147,11 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return vscode.extensions.all.filter(ext => isInstalledExtensionPath(ext.id, ext.extensionPath)).map(ext => ext.extensionPath);
 	}
 
+	/** The folder holding every installed extension: the setting, else the folder of the extensions that are installed. */
+	function extensionsDir(): string | undefined {
+		return settings().get<string>('extensionsDir')?.trim() || pickExtensionsDir(userExtensionPaths());
+	}
+
 	function resolveCliOrThrow(): CliInvocation {
 		const resolved = resolveCli({
 			command: settings().get<string>('codeCommand'),
@@ -154,7 +159,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			execPath: process.execPath,
 			appRoot: vscode.env.appRoot,
 			userDataDir: userDataDirFromGlobalStorage(context.globalStorageUri.fsPath),
-			extensionsDir: pickExtensionsDir(userExtensionPaths()),
+			extensionsDir: extensionsDir(),
 		});
 		if ('error' in resolved) {
 			throw new Error(resolved.error);
@@ -681,6 +686,6 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		groupsFilePath,
 		groupedExtensions: () => grouped,
 		refreshGroupedContext,
-		core: { loadGroups, saveGroups, profileNames, resolveCli: resolveCliOrThrow, run, onDidChangeGroups: groupsChanged.event },
+		core: { loadGroups, saveGroups, profileNames, resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event },
 	};
 }

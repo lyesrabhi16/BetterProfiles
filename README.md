@@ -57,6 +57,7 @@ That file is internal and undocumented, so a future VS Code release could change
 | `betterProfiles.groupsFile` | empty | Where the extension groups are kept. Empty means `groups.json` in the extension's global storage. |
 | `betterProfiles.autoSync` | `ask` | `off`, `ask` or `auto`: what to do when the current profile lacks extensions of its groups. See [Staying in sync](#staying-in-sync). |
 | `betterProfiles.keepExtensions` | `[]` | Extension ids that are never offered for uninstalling. |
+| `betterProfiles.extensionsDir` | empty | Advanced. The folder where VS Code keeps installed extensions, to read their names and icons. Empty means it is found from the extensions that are installed. |
 | `betterProfiles.codeCommand` | empty | Advanced. Run this executable instead of VS Code's own command line to list and install extensions. |
 | `betterProfiles.codeArgs` | `[]` | Advanced. Arguments that always come first for `codeCommand`, for example `--user-data-dir` and `--extensions-dir`. |
 
@@ -103,6 +104,12 @@ An icon in the Activity Bar opens two trees:
 - **Groups**: every group, how many extensions it has and which profiles follow it. Expand one to see its extensions.
 - **Profiles**: Default and every profile, the current one marked. Expanding a profile asks VS Code's command line what it
   has, once; **Refresh** asks again.
+
+Extensions are shown the way VS Code's own Extensions list shows them: the icon image and the display name, with the
+publisher (in a group) or the version (in a profile) beside it, and the id and description in the tooltip. They are read from
+each extension's own folder in VS Code's extensions folder, which holds every profile's extensions, so nothing is fetched from
+the network. An extension without an image gets the generic extension icon, and one that cannot be found is shown by its id
+(a group marks it "not installed").
 
 Drag and drop works between the two trees and inside them:
 

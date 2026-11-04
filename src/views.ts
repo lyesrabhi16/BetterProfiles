@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { PromptUi, TreeViewHandles } from './api';
+import { ExtensionCatalog, ExtensionInfo } from './catalog';
 import { CliInvocation, InstalledExtension, Runner, installExtension, listExtensions } from './cli';
 import { DragSource, DropOperation, DropTarget, planDrop } from './dnd';
 import { ALL_PROFILES, GroupsConfig, addToGroup, assignGroup, profilesFollowing, removeFromGroup, removeGroup } from './groups';
@@ -11,6 +12,8 @@ export interface ViewsCore {
 	profileNames(): Promise<string[]>;
 	resolveCli(): CliInvocation;
 	run: Runner;
+	/** Where the installed extensions are, to read their names and icons from. */
+	extensionsDir(): string | undefined;
 	onDidChangeGroups: vscode.Event<void>;
 	currentProfileName(): Promise<string | undefined>;
 }
@@ -28,6 +31,17 @@ const PROFILES_VIEW = 'betterProfiles.profiles';
 const GROUPS_MIME = 'application/vnd.code.tree.betterprofiles.groups';
 const PROFILES_MIME = 'application/vnd.code.tree.betterprofiles.profiles';
 
+/** An extension as VS Code's Extensions list shows it: its icon image and its display name; the id when it is not found. */
+function extensionItem(id: string, info: ExtensionInfo | undefined, contextValue: string): vscode.TreeItem {
+	const item = new vscode.TreeItem(info?.name ?? id, vscode.TreeItemCollapsibleState.None);
+	item.contextValue = contextValue;
+	item.iconPath = info?.iconPath ? vscode.Uri.file(info.iconPath) : new vscode.ThemeIcon('extensions');
+	item.tooltip = info
+		? [info.name, `${id}${info.version ? ` v${info.version}` : ''}`, ...(info.description ? [info.description] : [])].join('\n')
+		: id;
+	return item;
+}
+
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const message = (text: string): Node => ({ kind: 'message', text });
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -36,11 +50,12 @@ class GroupsProvider implements vscode.TreeDataProvider<Node> {
 	private readonly changed = new vscode.EventEmitter<Node | undefined | void>();
 	readonly onDidChangeTreeData = this.changed.event;
 
-	constructor(private readonly core: ViewsCore) {
+	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) {
 		core.onDidChangeGroups(() => this.refresh());
 	}
 
 	refresh(): void {
+		this.catalog.clear();
 		this.changed.fire();
 	}
 
@@ -74,9 +89,9 @@ class GroupsProvider implements vscode.TreeDataProvider<Node> {
 				return item;
 			}
 			case 'groupExtension': {
-				const item = new vscode.TreeItem(node.id, vscode.TreeItemCollapsibleState.None);
-				item.contextValue = 'groupExtension';
-				item.iconPath = new vscode.ThemeIcon('extensions');
+				const info = await this.catalog.lookup(node.id);
+				const item = extensionItem(node.id, info, 'groupExtension');
+				item.description = info ? info.publisher : this.catalog.known() ? 'not installed' : undefined;
 				return item;
 			}
 			default:
@@ -90,16 +105,18 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 	readonly onDidChangeTreeData = this.changed.event;
 	private cache = new Map<string, Promise<InstalledExtension[]>>();
 
-	constructor(private readonly core: ViewsCore) { }
+	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) { }
 
 	/** Forgets every list and reads them again when a profile is next opened. */
 	refresh(): void {
 		this.cache.clear();
+		this.catalog.clear();
 		this.changed.fire();
 	}
 
 	invalidate(profile: string): void {
 		this.cache.delete(profile);
+		this.catalog.clear(); // an install adds a folder
 		this.changed.fire({ kind: 'profile', name: profile });
 	}
 
@@ -140,10 +157,8 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 				return item;
 			}
 			case 'profileExtension': {
-				const item = new vscode.TreeItem(node.id, vscode.TreeItemCollapsibleState.None);
+				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version), 'profileExtension');
 				item.description = node.version;
-				item.contextValue = 'profileExtension';
-				item.iconPath = new vscode.ThemeIcon('extensions');
 				return item;
 			}
 			default:
@@ -209,8 +224,9 @@ function targetOf(node: Node | undefined): DropTarget | undefined {
 }
 
 export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi; log: vscode.LogOutputChannel }): { disposables: vscode.Disposable[]; handles: { groups: TreeViewHandles; profiles: TreeViewHandles } } {
-	const groups = new GroupsProvider(core);
-	const profiles = new ProfilesProvider(core);
+	const catalog = new ExtensionCatalog(() => core.extensionsDir());
+	const groups = new GroupsProvider(core, catalog);
+	const profiles = new ProfilesProvider(core, catalog);
 
 	const withProgress = <T>(title: string, task: () => Promise<T>) =>
 		vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task);

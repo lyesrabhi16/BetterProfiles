@@ -161,6 +161,12 @@
           "default": [],
           "scope": "application",
           "markdownDescription": "Extension ids (`publisher.name`) that are never offered for uninstalling, even when no group mentions them."
+        },
+        "betterProfiles.extensionsDir": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Advanced. The folder where VS Code keeps the installed extensions (for example `~/.vscode/extensions`). It is used to read each extension's name and icon for the Better Profiles tab, and to run VS Code's command line against the right installation. Leave empty to find it from the extensions that are installed."
         }
       }
     },

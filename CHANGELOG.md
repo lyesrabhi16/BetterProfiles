@@ -21,6 +21,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Extensions in the Better Profiles tab are shown like in VS Code's Extensions list: their icon image and display name (localised names
+  resolved), the publisher or version beside them, and the id and description in the tooltip. Read from each extension's own folder, so
+  nothing is fetched. New `betterProfiles.extensionsDir` setting, also used to point the command line at the right installation.
 - A Better Profiles tab in the Activity Bar with a Groups tree and a Profiles tree, and drag and drop between them: an extension onto
   a group adds it (a copy), an extension onto a profile installs it there, a group onto a profile gives it. Plus New Group, Delete Group,
   Remove From Group, Sync Profile With Its Groups, Set Workspace Triggers and Give To A Profile on the trees. Nothing dropped ever
