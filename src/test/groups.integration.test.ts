@@ -1849,7 +1849,7 @@ suite('Extension groups against a fake CLI', () => {
 					assert.deepStrictEqual(report.uninstalled, ['a.b', 'c.d']);
 					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x']);
 					assert.deepStrictEqual(readState().Agents, ['shared.x'], 'other profiles are untouched');
-					assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'a.b', '--profile', 'Python'], ['--uninstall-extension', 'c.d', '--profile', 'Python']]);
+					assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'a.b', '--uninstall-extension', 'c.d', '--profile', 'Python']], 'one run of the CLI for both');
 					assert.ok(!('Python' in readGroups().profiles));
 					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d'], 'the group itself stays, for every other profile');
 				});
@@ -1921,6 +1921,51 @@ suite('Extension groups against a fake CLI', () => {
 					assert.deepStrictEqual(report.uninstalled, ['c.d']);
 					assert.deepStrictEqual(readState().Python, ['fail.one']);
 					assert.ok(!('Python' in readGroups().profiles), 'the profile still stops following the group');
+				});
+
+				const listsOf = (profileName: string) => calls().filter(a => a.includes('--list-extensions') && (profileName === 'Default' ? !a.includes('--profile') : a.includes(profileName))).length;
+
+				test('each profile is listed once, whatever the number of extensions to uninstall', async () => {
+					writeGroups({ groups: { web: ['a.b', 'c.d', 'p.installed'] }, profiles: { Python: ['web'] } });
+					answer({ confirm: () => true });
+					await removeGroup();
+					for (const name of ['Default', 'Python', 'Agents']) {
+						assert.strictEqual(listsOf(name), 1, name);
+					}
+					assert.strictEqual(uninstalls().length, 1);
+				});
+
+				test('the other profiles are not even listed when the profile has nothing of the group to uninstall', async () => {
+					writeState({ Default: ['common.one'], Python: ['p.installed'], Agents: [] });
+					answer({});
+					await removeGroup();
+					assert.strictEqual(listsOf('Python'), 1);
+					assert.strictEqual(listsOf('Default'), 0);
+					assert.strictEqual(listsOf('Agents'), 0);
+				});
+
+				test('the profiles are listed side by side, not one after the other', async () => {
+					process.env.STUB_DELAY_MS = '500';
+					try {
+						answer({ confirm: () => true });
+						const started = Date.now();
+						await removeGroup();
+						const took = Date.now() - started;
+						assert.ok(took < 1300, `three lists of 500 ms one after the other would take over 1500 ms; it took ${took} ms`);
+					} finally {
+						delete process.env.STUB_DELAY_MS;
+					}
+				});
+
+				test('a profile whose list the tree already has is not listed again afterwards: the tree drops what was uninstalled', async () => {
+					await children('profiles', profile('Python')); // the tree reads it once
+					answer({ confirm: () => true });
+					await removeGroup();
+					const before = listsOf('Python');
+					const kids = await children('profiles', profile('Python'));
+					assert.strictEqual(listsOf('Python'), before, 'no new run of the CLI to show the result');
+					assert.ok(!kids.some(n => n.id === 'a.b' || n.id === 'c.d'), JSON.stringify(kids.map(n => n.id)));
+					assert.ok(kids.some(n => n.id === 'p.installed'));
 				});
 
 				test('the tree is told to redraw as a whole afterwards: VS Code ignores a refresh of an item object it does not know', async () => {

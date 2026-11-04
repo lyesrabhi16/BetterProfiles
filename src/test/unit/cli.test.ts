@@ -9,6 +9,8 @@ import {
 	installExtension,
 	uninstallArgs,
 	uninstallExtension,
+	uninstallExtensions,
+	uninstallManyArgs,
 	listArgs,
 	listExtensions,
 	parseExtensionList,
@@ -219,5 +221,75 @@ suite('uninstallExtension', () => {
 			assert.strictEqual((await uninstallExtension(cli, run, bad, 'Python')).ok, false, bad);
 		}
 		assert.deepStrictEqual(calls, []);
+	});
+});
+
+suite('uninstallManyArgs', () => {
+	test('one flag per extension, then the profile once, as separate arguments', () => {
+		assert.deepStrictEqual(uninstallManyArgs(['a.b', 'c.d'], 'My Python'), ['--uninstall-extension', 'a.b', '--uninstall-extension', 'c.d', '--profile', 'My Python']);
+		assert.deepStrictEqual(uninstallManyArgs(['a.b'], 'Default'), ['--uninstall-extension', 'a.b']);
+	});
+});
+
+suite('uninstallExtensions (many in one run of the CLI)', () => {
+	const lines = (...ids: string[]) => ids.map(id => `Uninstalling ${id}...\nExtension '${id}' was successfully uninstalled!`).join('\n') + '\n';
+
+	test('starts the CLI once for all of them', async () => {
+		const { run, calls } = fakeRunner({ stdout: lines('a.b', 'c.d') });
+		const results = await uninstallExtensions(cli, run, ['a.b', 'c.d'], 'Python');
+		assert.strictEqual(calls.length, 1);
+		assert.deepStrictEqual(calls[0].args, [...cli.args, '--uninstall-extension', 'a.b', '--uninstall-extension', 'c.d', '--profile', 'Python']);
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['a.b', true], ['c.d', true]]);
+	});
+
+	test('when it exits with 0 they all went, whatever it printed', async () => {
+		const { run } = fakeRunner({ stdout: 'something else\n' });
+		assert.ok((await uninstallExtensions(cli, run, ['a.b', 'c.d'])).every(r => r.ok));
+	});
+
+	test('when it fails, the ones it says went are told apart from the others', async () => {
+		const { run } = fakeRunner({ code: 1, stdout: lines('a.b'), stderr: "Extension 'c.d' is not installed.\nMake sure you use the full extension ID\n" });
+		const [first, second] = await uninstallExtensions(cli, run, ['a.b', 'c.d']);
+		assert.strictEqual(first.ok, true);
+		assert.strictEqual(second.ok, false);
+		assert.ok(second.message.includes('c.d') && second.message.includes('not installed'), second.message);
+	});
+
+	test('an id is recognised in its output whatever the case', async () => {
+		const { run } = fakeRunner({ code: 1, stdout: lines('A.B'), stderr: 'boom\n' });
+		const [first, second] = await uninstallExtensions(cli, run, ['a.b', 'x.y']);
+		assert.deepStrictEqual([first.ok, second.ok], [true, false]);
+	});
+
+	test('when it fails and says nothing about an extension, that one counts as not uninstalled, with the first error line', async () => {
+		const { run } = fakeRunner({ code: 3, stderr: 'Cannot uninstall: busy\n' });
+		const results = await uninstallExtensions(cli, run, ['a.b', 'c.d']);
+		assert.ok(results.every(r => !r.ok && r.message.includes('busy')));
+	});
+
+	test('what is not a plain extension id is never passed, and the others still run in one go', async () => {
+		const { run, calls } = fakeRunner({ stdout: lines('a.b') });
+		const results = await uninstallExtensions(cli, run, ['--install-extension', 'a.b', '../x.vsix'], 'P');
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['--install-extension', false], ['a.b', true], ['../x.vsix', false]]);
+		assert.strictEqual(calls.length, 1);
+		assert.deepStrictEqual(calls[0].args, [...cli.args, '--uninstall-extension', 'a.b', '--profile', 'P']);
+	});
+
+	test('nothing to uninstall: the CLI is not started', async () => {
+		const { run, calls } = fakeRunner({});
+		assert.deepStrictEqual(await uninstallExtensions(cli, run, [], 'P'), []);
+		assert.deepStrictEqual(calls, []);
+	});
+
+	test('a CLI that cannot be run fails them all without throwing', async () => {
+		const run: Runner = async () => { throw new Error('ENOENT'); };
+		const results = await uninstallExtensions(cli, run, ['a.b', 'c.d']);
+		assert.ok(results.every(r => !r.ok && r.message.includes('ENOENT')));
+	});
+
+	test('one extension behaves like uninstallExtension', async () => {
+		const { run } = fakeRunner({ stdout: lines('a.b') });
+		const [only] = await uninstallExtensions(cli, run, ['a.b']);
+		assert.deepStrictEqual(only, await uninstallExtension(cli, run, 'a.b'));
 	});
 });
