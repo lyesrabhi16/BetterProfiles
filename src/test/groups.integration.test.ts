@@ -67,10 +67,11 @@ suite('Extension groups against a fake CLI', () => {
 		await set('groupsFile', groupsFile);
 		await set('codeCommand', process.execPath);
 		await set('codeArgs', [STUB]);
+		await set('listFromFiles', false); // these tests fake the command line; the files of the VS Code they run in must not answer
 	});
 
 	teardown(async () => {
-		for (const key of ['storageFile', 'groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions', 'extensionsDir']) {
+		for (const key of ['storageFile', 'groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions', 'extensionsDir', 'listFromFiles']) {
 			await set(key, undefined);
 		}
 		fs.rmSync(dir, { recursive: true, force: true });
@@ -1457,6 +1458,187 @@ suite('Extension groups against a fake CLI', () => {
 				assert.ok(await until(() => fired > 0));
 				subscription?.dispose();
 			});
+		});
+
+		suite('instant actions', () => {
+			type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
+			const untilAsync = async (condition: () => Promise<boolean>, ms = 1500) => {
+				const end = Date.now() + ms;
+				while (Date.now() < end) {
+					if (await condition()) {
+						return true;
+					}
+					await new Promise(resolve => setTimeout(resolve, 20));
+				}
+				return false;
+			};
+			const ids = async (view: ViewName, node: Node) => (await children(view, node)).map(n => n.id);
+			const listCalls = () => calls().filter(a => a.includes('--list-extensions')).length;
+			teardown(() => {
+				delete process.env.STUB_ACTION_DELAY_MS;
+				delete process.env.STUB_DELAY_MS;
+			});
+
+			suite('what is done to a profile shows before the command line is done', () => {
+				setup(() => writeState({ Default: ['common.one'], Python: ['a.b', 'c.d', 'p.installed', 'shared.x'], Agents: ['shared.x'] }));
+
+				test('an extension removed from a profile disappears at once, while it is still being uninstalled', async () => {
+					process.env.STUB_ACTION_DELAY_MS = '1500';
+					answer({ confirm: () => true });
+					const running = exec<Report>('better-profiles.view.removeExtensionFromProfile', profileGroupExt('Python', 'web', 'a.b'));
+					assert.ok(await untilAsync(async () => !(await ids('profiles', profileGroup('Python', 'web'))).includes('a.b'), 900), 'gone from the tree within a second');
+					assert.ok(readState().Python.includes('a.b'), 'the command line has not finished yet');
+					const report = await running;
+					assert.deepStrictEqual(report.uninstalled, ['a.b']);
+					assert.ok(!readState().Python.includes('a.b'));
+					assert.ok(!(await ids('profiles', profileGroup('Python', 'web'))).includes('a.b'), 'and it stays gone');
+				});
+
+				test('a group removed from a profile takes its extensions out of the profile at once', async () => {
+					process.env.STUB_ACTION_DELAY_MS = '1500';
+					answer({ confirm: () => true });
+					const running = exec<Report>('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
+					assert.ok(await untilAsync(async () => {
+						const kids = await children('profiles', profile('Python'));
+						return !kids.some(n => n.kind === 'profileGroup' && n.name === 'web') && !kids.some(n => n.id === 'a.b' || n.id === 'c.d');
+					}, 900), 'gone from the tree within a second');
+					assert.ok(readState().Python.includes('a.b'), 'the command line has not finished yet');
+					await running;
+					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x']);
+				});
+
+				test('a removal that could not be done brings the extension back', async () => {
+					writeGroups({ groups: { web: ['fail.one', 'c.d'] }, profiles: { Python: ['web'] } });
+					writeState({ Default: [], Python: ['fail.one', 'c.d'], Agents: [] });
+					answer({ confirm: () => true });
+					const report = await exec<Report>('better-profiles.view.removeExtensionFromProfile', profileGroupExt('Python', 'web', 'fail.one'));
+					assert.deepStrictEqual(report.failed, ['fail.one']);
+					assert.ok((await ids('profiles', profileGroup('Python', 'web'))).includes('fail.one'), 'it is still there, so it is shown again');
+				});
+
+				test('extensions dropped on a profile appear at once, marked as being installed, and stop being marked when they are in', async () => {
+					process.env.STUB_ACTION_DELAY_MS = '1200';
+					const running = drop('profiles', profile('Agents'), await drag('groups', [groupExt('web', 'a.b'), groupExt('web', 'c.d')]));
+					assert.ok(await untilAsync(async () => (await children('profiles', profile('Agents'))).some(n => n.id === 'a.b' && n.installing === true), 900), 'shown within a second');
+					const shown = (await children('profiles', profile('Agents'))).find(n => n.id === 'a.b')!;
+					const i = await item('profiles', shown);
+					assert.ok(String(i.description).includes('installing'), String(i.description));
+					assert.ok(!readState().Agents.includes('a.b'), 'the command line has not finished yet');
+					await running;
+					assert.ok(readState().Agents.includes('a.b') && readState().Agents.includes('c.d'));
+					const after = await children('profiles', profile('Agents'));
+					assert.ok(after.some(n => n.id === 'a.b') && after.every(n => !n.installing), 'no longer marked');
+				});
+
+				test('an install that fails takes the extension off the list again', async () => {
+					writeGroups({ groups: { web: ['fail.two', 'c.d'] }, profiles: {} });
+					await drop('profiles', profile('Agents'), await drag('groups', [groupExt('web', 'fail.two')]));
+					assert.ok(!(await ids('profiles', profile('Agents'))).includes('fail.two'));
+				});
+
+				test('a sync shows what it installs at once', async () => {
+					process.env.STUB_ACTION_DELAY_MS = '1200';
+					writeState({ Default: [], Python: ['p.installed'], Agents: [] });
+					const running = sync({ profile: 'Python' });
+					assert.ok(await untilAsync(async () => (await children('profiles', profile('Python'))).some(n => n.installing === true), 900), 'what is being installed is shown within a second');
+					await running;
+				});
+
+				test('Install in Other Profiles shows the extension in the profiles it goes to at once', async () => {
+					process.env.STUB_ACTION_DELAY_MS = '1200';
+					answer({ pickMany: () => ['Agents'] });
+					const running = exec('better-profiles.view.installExtensionInProfiles', profileExt('Python', 'p.installed'));
+					assert.ok(await untilAsync(async () => (await children('profiles', profile('Agents'))).some(n => n.id === 'p.installed' && n.installing === true), 900));
+					await running;
+				});
+			});
+
+			suite('lists are read from the files VS Code keeps, not from its command line', () => {
+				let root: string;
+				const entry = (id: string, metadata: Record<string, unknown> = {}) => ({ identifier: { id }, version: '1.0.0', relativeLocation: `${id}-1.0.0`, metadata: { isApplicationScoped: false, ...metadata } });
+				const writeIndex = (file: string, list: unknown[]) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(list)); };
+				const defaultIndex = () => path.join(root, 'extensions', 'extensions.json');
+				const profileIndex = (location: string) => path.join(root, 'User', 'profiles', location, 'extensions.json');
+
+				setup(async () => {
+					root = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-files-'));
+					const storage = path.join(root, 'User', 'globalStorage', 'storage.json');
+					fs.mkdirSync(path.dirname(storage), { recursive: true });
+					fs.writeFileSync(storage, JSON.stringify({
+						userDataProfiles: [{ name: 'Python', location: 'p1' }, { name: 'Agents', location: 'a1' }],
+						profileAssociations: { workspaces: { [vscode.workspace.workspaceFolders![0].uri.toString()]: 'p1' } },
+					}));
+					writeIndex(defaultIndex(), [entry('common.one'), entry('app.wide', { isApplicationScoped: true })]);
+					writeIndex(profileIndex('p1'), [entry('p.installed'), entry('shared.x')]);
+					writeIndex(profileIndex('a1'), [entry('shared.x')]);
+					await set('storageFile', storage);
+					await set('extensionsDir', path.join(root, 'extensions'));
+					await set('listFromFiles', true);
+					api.views.profiles.refresh();
+				});
+				teardown(() => fs.rmSync(root, { recursive: true, force: true }));
+
+				test('the tree shows a profile without a single run of the command line', async () => {
+					assert.deepStrictEqual((await ids('profiles', profile('Python'))).sort(), ['app.wide', 'p.installed', 'shared.x']);
+					assert.deepStrictEqual((await ids('profiles', profile('Default'))).sort(), ['app.wide', 'common.one']);
+					assert.strictEqual(listCalls(), 0);
+				});
+
+				test('what VS Code installs for all profiles at once is in every profile, as with the command line', async () => {
+					assert.ok((await ids('profiles', profile('Agents'))).includes('app.wide'));
+				});
+
+				test('a profile whose folder exists but has no list yet is an empty profile', async () => {
+					fs.rmSync(profileIndex('a1'));
+					assert.deepStrictEqual(await ids('profiles', profile('Agents')), ['app.wide']);
+					assert.strictEqual(listCalls(), 0);
+				});
+
+				test('a profile VS Code has no folder for is not assumed empty: the command line is asked', async () => {
+					fs.rmSync(path.dirname(profileIndex('a1')), { recursive: true });
+					state_for_cli();
+					assert.deepStrictEqual(await ids('profiles', profile('Agents')), ['shared.x']);
+					assert.ok(listCalls() > 0);
+				});
+
+				test('a list that cannot be understood is not trusted: the command line is asked', async () => {
+					fs.writeFileSync(profileIndex('p1'), '{ broken');
+					state_for_cli();
+					assert.deepStrictEqual((await ids('profiles', profile('Python'))).sort(), ['p.installed', 'shared.x']);
+					assert.ok(listCalls() > 0);
+				});
+
+				test('with the setting off the command line is always used', async () => {
+					await set('listFromFiles', false);
+					api.views.profiles.refresh();
+					state_for_cli();
+					await ids('profiles', profile('Python'));
+					assert.ok(listCalls() > 0);
+				});
+
+				test('a change made by something else (the Extensions view, another window) shows without a refresh', async () => {
+					await ids('profiles', profile('Python'));
+					await new Promise(resolve => setTimeout(resolve, 300)); // the watcher is set up when a file is first read
+					writeIndex(profileIndex('p1'), [entry('p.installed'), entry('shared.x'), entry('just.arrived')]);
+					assert.ok(await untilAsync(async () => (await ids('profiles', profile('Python'))).includes('just.arrived'), 4000), 'noticed within a few seconds');
+					assert.strictEqual(listCalls(), 0);
+				});
+
+				test('the question before an uninstall is asked at once, with no run of the command line first', async () => {
+					process.env.STUB_DELAY_MS = '1500'; // a command line list would take this long
+					writeGroups({ groups: { web: ['p.installed', 'x.other'] }, profiles: { Python: ['web'] } });
+					let asked = -1;
+					const started = Date.now();
+					answer({ confirm: () => { asked = Date.now() - started; return false; } });
+					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
+					assert.ok(asked >= 0 && asked < 700, `asked after ${asked} ms`);
+					assert.strictEqual(listCalls(), 0);
+				});
+			});
+
+			function state_for_cli() {
+				writeState({ Default: ['common.one'], Python: ['p.installed', 'shared.x'], Agents: ['shared.x'] });
+			}
 		});
 
 		suite('the graph view', () => {

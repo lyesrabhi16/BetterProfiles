@@ -17,6 +17,7 @@ import {
 	pickExtensionsDir,
 	resolveCli,
 	userDataDirFromGlobalStorage,
+	userDataDirFromStorageFile,
 } from '../../cli';
 
 const cli: CliInvocation = { command: '/bin/vscode', args: ['/app/out/cli.js', '--user-data-dir', '/ud', '--extensions-dir', '/ex'], env: { ELECTRON_RUN_AS_NODE: '1' } };
@@ -291,5 +292,17 @@ suite('uninstallExtensions (many in one run of the CLI)', () => {
 		const { run } = fakeRunner({ stdout: lines('a.b') });
 		const [only] = await uninstallExtensions(cli, run, ['a.b']);
 		assert.deepStrictEqual(only, await uninstallExtension(cli, run, 'a.b'));
+	});
+});
+
+suite('userDataDirFromStorageFile', () => {
+	test('storage.json lives in <user-data-dir>/User/globalStorage', () => {
+		assert.strictEqual(userDataDirFromStorageFile('/home/u/.config/Code/User/globalStorage/storage.json'), '/home/u/.config/Code');
+	});
+
+	test('a file anywhere else says nothing about the user data folder', () => {
+		assert.strictEqual(userDataDirFromStorageFile('/tmp/x/storage.json'), undefined);
+		assert.strictEqual(userDataDirFromStorageFile('/home/u/.config/Code/User/globalStorage/other.json'), undefined);
+		assert.strictEqual(userDataDirFromStorageFile(''), undefined);
 	});
 });

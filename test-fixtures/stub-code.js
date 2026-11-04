@@ -13,6 +13,8 @@ const flag = name => {
 const profile = flag('--profile') ?? 'Default';
 const delay = Number(process.env.STUB_DELAY_MS || 0);
 const wait = () => (delay > 0 ? Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay) : undefined);
+const actionDelay = Number(process.env.STUB_ACTION_DELAY_MS || 0);
+const waitForAction = () => (actionDelay > 0 ? Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, actionDelay) : undefined);
 const all = name => args.flatMap((a, i) => (a === name ? [args[i + 1]] : []));
 const state = JSON.parse(fs.readFileSync(process.env.STUB_STATE, 'utf8'));
 
@@ -23,6 +25,7 @@ if (!(profile in state)) {
 	wait();
 	console.log(state[profile].map(id => `${id}@1.0.0`).join('\n'));
 } else if (args.includes('--install-extension')) {
+	waitForAction();
 	const id = flag('--install-extension');
 	if (id.startsWith('fail.')) {
 		console.error(`Extension '${id}' not found.`);
@@ -34,6 +37,7 @@ if (!(profile in state)) {
 	}
 	console.log(`Installing extensions...\nExtension '${id}' v1.0.0 was successfully installed.`);
 } else if (args.includes('--uninstall-extension')) {
+	waitForAction();
 	let failed = false;
 	for (const id of all('--uninstall-extension')) {
 		const at = state[profile].findIndex(existing => existing.toLowerCase() === id.toLowerCase());
