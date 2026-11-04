@@ -140,7 +140,7 @@
         },
         {
           "command": "better-profiles.extensionRemoveFromGroup",
-          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false && extension in betterProfiles.groupedExtensions",
           "group": "2_profiles@2"
         },
         {

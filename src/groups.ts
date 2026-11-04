@@ -325,6 +325,6 @@ export function profilesFollowing(config: GroupsConfig, group: string): string[]
 }
 
 /** Every extension that is in some group, lower-case and once: the form VS Code's menus use for an extension's id. */
-export function groupedExtensionIds(_config: GroupsConfig): string[] {
-	throw new Error('not implemented');
+export function groupedExtensionIds(config: GroupsConfig): string[] {
+	return [...new Set(Object.values(config.groups).flat().map(id => id.toLowerCase()))];
 }

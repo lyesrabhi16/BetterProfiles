@@ -66,7 +66,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		refresh,
 		checkSync: () => groups.checkSync(),
 		resetPrompts: () => groups.resetPrompts(),
-		groupedExtensions: () => { throw new Error('not implemented'); },
+		groupedExtensions: () => groups.groupedExtensions(),
 		ui,
 		statusBarItem,
 	};
@@ -93,10 +93,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),
 		...groups.disposables,
 		// editing the groups file by hand: check again when it is saved
-		vscode.workspace.onDidSaveTextDocument(doc => doc.uri.fsPath === groups.groupsFilePath() && void groups.checkSync()),
+		vscode.workspace.onDidSaveTextDocument(doc => {
+			if (doc.uri.fsPath === groups.groupsFilePath()) {
+				void groups.refreshGroupedContext();
+				void groups.checkSync();
+			}
+		}),
+		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.groupsFile') && void groups.refreshGroupedContext()),
 	);
 
 	await refresh();
+	await groups.refreshGroupedContext();
 
 	// Shortly after startup, look whether this profile has all the extensions of its groups.
 	// Not under test: the tests call checkSync() themselves, and a timer would race with them.

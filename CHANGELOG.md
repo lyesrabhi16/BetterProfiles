@@ -21,6 +21,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- The Extensions view gear menu now shows `Remove from Better Profiles Group…` only for extensions that are in a group, and the
+  `Add to Better Profiles Group…` list marks the groups that already hold the extension. (A menu label is fixed text, so the
+  group names themselves cannot be shown in the menu.)
 - The notifications after adding an extension to a group, or giving a group to a profile, now have a button for the next
   step (`Sync Profile…`, or `Give Group To A Profile…` when no profile follows the group) instead of telling you which command
   to run.

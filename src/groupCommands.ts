@@ -25,6 +25,7 @@ import {
 	commonToAllProfiles,
 	desiredExtensions,
 	emptyGroups,
+	groupedExtensionIds,
 	groupsContaining,
 	isExtensionId,
 	parseGroups,
@@ -53,6 +54,10 @@ export interface SyncReport {
 type UninstallMode = 'none' | 'ask' | string[];
 
 export interface GroupFeatures {
+	/** The lower-case ids of the extensions that are in some group (what the Extensions view menu is told). */
+	groupedExtensions(): readonly string[];
+	/** Reads the groups file again and tells VS Code, so the menu shows the right entries. */
+	refreshGroupedContext(): Promise<void>;
 	disposables: vscode.Disposable[];
 	checkSync(): Promise<void>;
 	resetPrompts(): Promise<void>;
@@ -104,9 +109,26 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 	}
 
+	let grouped: readonly string[] = [];
+
+	/**
+	 * A menu entry's label is fixed text, so group names cannot appear in the Extensions view menu. What a menu can do
+	 * is depend on a context key: this one lists the extensions that are in a group, and "Remove from group" is only
+	 * shown for those. The menu's own `extension` key is the lower-case id.
+	 */
+	async function refreshGroupedContext(): Promise<void> {
+		try {
+			grouped = groupedExtensionIds((await loadGroups()).config);
+		} catch {
+			grouped = []; // a broken or unreadable file: nothing counts as grouped, and the commands report the problem themselves
+		}
+		await vscode.commands.executeCommand('setContext', 'betterProfiles.groupedExtensions', [...grouped]);
+	}
+
 	async function saveGroups(file: string, config: GroupsConfig): Promise<void> {
 		await fs.mkdir(path.dirname(file), { recursive: true });
 		await fs.writeFile(file, serializeGroups(config), 'utf8');
+		await refreshGroupedContext();
 	}
 
 	/** Default plus every profile VS Code has. */
@@ -144,8 +166,13 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return ui.pickOne(title, items);
 	}
 
-	async function pickGroup(config: GroupsConfig, title: string, options: { allowNew?: boolean } = {}): Promise<string | undefined> {
-		const items: PickItem[] = Object.keys(config.groups).map(name => ({ id: name, label: name, description: `${config.groups[name].length} extensions` }));
+	async function pickGroup(config: GroupsConfig, title: string, options: { allowNew?: boolean; holding?: string } = {}): Promise<string | undefined> {
+		const holders = options.holding ? groupsContaining(config, options.holding) : [];
+		const items: PickItem[] = Object.keys(config.groups).map(name => ({
+			id: name,
+			label: name,
+			description: holders.includes(name) ? '$(check) already has it' : `${config.groups[name].length} extensions`,
+		}));
 		return ui.pickOne(title, items, options.allowNew ? { newItem: { label: '$(add) New group…', prompt: 'Name of the new group' } } : undefined);
 	}
 
@@ -239,7 +266,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	const extensionAddToGroup = async (target: unknown): Promise<GroupsConfig | undefined> => {
 		const id = extensionIdOf(target);
 		const { config, file } = await loadGroups();
-		const group = optionsOf<{ group: string }>(target).group ?? await pickGroup(config, `Add ${id} to which group?`, { allowNew: true });
+		const group = optionsOf<{ group: string }>(target).group ?? await pickGroup(config, `Add ${id} to which group?`, { allowNew: true, holding: id });
 		if (group === undefined) {
 			return undefined;
 		}
@@ -628,5 +655,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		checkSync,
 		resetPrompts,
 		groupsFilePath,
+		groupedExtensions: () => grouped,
+		refreshGroupedContext,
 	};
 }

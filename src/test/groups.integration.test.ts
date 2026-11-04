@@ -882,6 +882,14 @@ suite('Extension groups against a fake CLI', () => {
 			return condition();
 		};
 
+		// pointing the setting at a different file is a real change, so the extension reads it again
+		let fileCount = 0;
+		const useGroups = async (content: object | string) => {
+			const file = path.join(dir, `grouped-${++fileCount}.json`);
+			fs.writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content));
+			await set('groupsFile', file);
+		};
+
 		setup(async () => {
 			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
 			answer({});
@@ -897,15 +905,13 @@ suite('Extension groups against a fake CLI', () => {
 		});
 
 		test('the list holds every extension of every group, lower-case and once', async () => {
-			writeGroups({ groups: { web: ['A.One', 'b.two'], tools: ['a.one', 'C.Three'] } });
-			await set('groupsFile', groupsFile); // changing the setting makes it read the file again
+			await useGroups({ groups: { web: ['A.One', 'b.two'], tools: ['a.one', 'C.Three'] } });
 			assert.ok(await until(() => api.groupedExtensions().length === 3), api.groupedExtensions().join(','));
 			assert.deepStrictEqual([...api.groupedExtensions()].sort(), ['a.one', 'b.two', 'c.three']);
 		});
 
 		test('it follows what the commands change', async () => {
-			writeGroups({ groups: { web: ['a.b'] } });
-			await set('groupsFile', groupsFile);
+			await useGroups({ groups: { web: ['a.b'] } });
 			assert.ok(await until(() => api.groupedExtensions().includes('a.b')));
 			await exec(ADD, { id: 'X.New', group: 'web' });
 			assert.ok(api.groupedExtensions().includes('x.new'), 'added');
@@ -915,9 +921,10 @@ suite('Extension groups against a fake CLI', () => {
 		});
 
 		test('a missing or broken groups file gives an empty list and no error', async () => {
-			fs.writeFileSync(groupsFile, '{ broken');
-			await set('groupsFile', groupsFile);
-			assert.ok(await until(() => api.groupedExtensions().length === 0));
+			await useGroups({ groups: { web: ['a.b'] } });
+			assert.ok(await until(() => api.groupedExtensions().length === 1));
+			await useGroups('{ broken');
+			assert.ok(await until(() => api.groupedExtensions().length === 0), 'a broken file means nothing is grouped');
 			await set('groupsFile', path.join(dir, 'does-not-exist.json'));
 			assert.ok(await until(() => api.groupedExtensions().length === 0));
 		});
