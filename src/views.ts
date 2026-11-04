@@ -18,6 +18,10 @@ export interface ViewsCore {
 	/** Where the installed extensions are, to read their names and icons from. */
 	extensionsDir(): string | undefined;
 	onDidChangeGroups: vscode.Event<void>;
+	/** A profile's list of extensions changed behind the tree's back (something was uninstalled from it). */
+	onDidChangeProfileExtensions: vscode.Event<string>;
+	/** An extension installed on purpose is wanted again: lifts the profile's exclusion of it. */
+	forgetExclusions(profile: string, ids: readonly string[]): Promise<void>;
 	currentProfileName(): Promise<string | undefined>;
 }
 
@@ -116,6 +120,7 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 	constructor(private readonly core: ViewsCore, private readonly catalog: ExtensionCatalog) {
 		// the groups decide how a profile's extensions are laid out; what each profile has is unchanged, so its lists are kept
 		core.onDidChangeGroups(() => this.changed.fire());
+		core.onDidChangeProfileExtensions(profile => this.invalidate(profile));
 	}
 
 	/** Forgets every list and reads them again when a profile is next opened. */
@@ -197,7 +202,7 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 				item.iconPath = new vscode.ThemeIcon('package');
 				item.tooltip = have === total
 					? `${node.profile} has every extension of "${node.name}".`
-					: `${node.profile} lacks ${(await this.missingFrom(node.name, group?.installed ?? [])).join(', ')}. Sync the profile to install it.`;
+					: `${node.profile} lacks ${(group?.missing ?? []).join(', ')}. Sync the profile to install it.`;
 				return item;
 			}
 			case 'profileGroupExtension':
@@ -209,12 +214,6 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 			default:
 				return messageItem(node);
 		}
-	}
-
-	/** The extensions of a group that a profile does not have. */
-	private async missingFrom(group: string, installed: readonly string[]): Promise<string[]> {
-		const have = new Set(installed.map(id => id.toLowerCase()));
-		return ((await this.groupsConfig()).groups[group] ?? []).filter(id => !have.has(id.toLowerCase()));
 	}
 }
 
@@ -302,6 +301,7 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 		});
 		profiles.invalidate(profile);
 		const failed = results.filter(r => !r.ok);
+		await core.forgetExclusions(profile, ids.filter(id => !failed.some(f => f.id.toLowerCase() === id.toLowerCase()))); // wanted again, installed already or not
 		if (results.length === 0) {
 			void vscode.window.showInformationMessage(`"${profile}" already has ${ids.length === 1 ? 'it' : 'all of them'}.`);
 		} else if (failed.length === 0) {
@@ -469,11 +469,7 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 			}),
 
 			command('better-profiles.view.removeFromGroup', async (arg?: unknown) => {
-				const node = extensionNodeOf(arg);
-				if (node.kind === 'profileExtension') {
-					throw new Error('This extension is not in a group of this profile.');
-				}
-				const { group, id } = node;
+				const { group, id } = nodeOf(arg, 'groupExtension'); // the real group: only from the Groups tree
 				const { config, file } = await core.loadGroups();
 				await core.saveGroups(file, removeFromGroup(config, group, id));
 				void vscode.window.showInformationMessage(`Removed ${id} from "${group}". Nothing was uninstalled.`);
@@ -491,9 +487,17 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 					}
 					return;
 				}
-				await core.saveGroups(file, unassignGroup(config, profile, name));
-				const stillAll = (config.profiles[ALL_PROFILES] ?? []).includes(name);
-				void vscode.window.showInformationMessage(`"${profile}" no longer follows "${name}"${stillAll ? ', which still goes to all profiles' : ''}. Its extensions stay installed.`);
+				// stops the profile following the group and uninstalls the group's extensions from it, after asking
+				return vscode.commands.executeCommand('better-profiles.removeGroupFromProfile', { profile, group: name });
+			}),
+
+			command('better-profiles.view.removeExtensionFromProfile', (arg?: unknown) => {
+				const node = extensionNodeOf(arg);
+				if (node.kind === 'groupExtension') {
+					throw new Error('This command works on an item of the Better Profiles tab.'); // that one belongs to the real group
+				}
+				// only the id and the profile are passed on: what the node says about its group must not answer for the user
+				return vscode.commands.executeCommand('better-profiles.removeExtensionFromProfile', { profile: node.profile, id: node.id });
 			}),
 
 			command('better-profiles.view.syncProfile', (arg?: unknown) =>

@@ -6,6 +6,8 @@ export interface GroupsConfig {
 	profiles: Record<string, string[]>;
 	/** group name -> globs. A group with triggers is only wanted automatically where the workspace matches one. */
 	triggers?: Record<string, string[]>;
+	/** profile name -> extensions it does not want although a group it follows has them. The group itself is not changed. */
+	excludes?: Record<string, string[]>;
 }
 
 /** The `profiles` key whose groups apply to every profile. */
@@ -107,6 +109,25 @@ export function parseGroups(text: string): { config: GroupsConfig; warnings: str
 			}
 		}
 	}
+	if (isRecord(data.excludes)) {
+		for (const [profile, value] of Object.entries(data.excludes)) {
+			if (!Array.isArray(value)) {
+				warnings.push(`Exclusions of profile "${profile}" are not a list of extension ids; ignored.`);
+				continue;
+			}
+			const ids: string[] = [];
+			for (const entry of value) {
+				if (typeof entry === 'string' && isExtensionId(entry)) {
+					ids.push(entry);
+				} else {
+					warnings.push(`Profile "${profile}": ${JSON.stringify(entry)} is not a valid extension id (expected publisher.name); ignored.`);
+				}
+			}
+			if (ids.length > 0) {
+				config.excludes = { ...(config.excludes ?? {}), [profile]: unique(ids) };
+			}
+		}
+	}
 	return { config, warnings };
 }
 
@@ -124,11 +145,7 @@ export function addToGroup(config: GroupsConfig, group: string, ids: string[]): 
 			throw new Error(`"${id}" is not a valid extension id (expected publisher.name).`);
 		}
 	}
-	return {
-		groups: { ...config.groups, [name]: unique([...(has(config.groups, name) ? config.groups[name] : []), ...ids]) },
-		profiles: { ...config.profiles },
-		...(config.triggers ? { triggers: config.triggers } : {}),
-	};
+	return { ...config, groups: { ...config.groups, [name]: unique([...(has(config.groups, name) ? config.groups[name] : []), ...ids]) } };
 }
 
 export function assignGroup(config: GroupsConfig, profile: string, group: string): GroupsConfig {
@@ -141,11 +158,7 @@ export function assignGroup(config: GroupsConfig, profile: string, group: string
 		throw new Error('A group name is required.');
 	}
 	const current = has(config.profiles, profileName) ? config.profiles[profileName] : [];
-	return {
-		groups: { ...config.groups },
-		profiles: { ...config.profiles, [profileName]: current.includes(groupName) ? current : [...current, groupName] },
-		...(config.triggers ? { triggers: config.triggers } : {}),
-	};
+	return { ...config, profiles: { ...config.profiles, [profileName]: current.includes(groupName) ? current : [...current, groupName] } };
 }
 
 /**
@@ -159,11 +172,38 @@ export function unassignGroup(config: GroupsConfig, profile: string, group: stri
 	}
 	const { [profile]: _old, ...others } = config.profiles;
 	const left = current.filter(name => name !== group);
-	return {
-		groups: { ...config.groups },
-		profiles: left.length > 0 ? { ...others, [profile]: left } : others,
-		...(config.triggers ? { triggers: config.triggers } : {}),
-	};
+	return { ...config, profiles: left.length > 0 ? { ...others, [profile]: left } : others };
+}
+
+/** The extensions a profile does not want although its groups have them. */
+export function excludedFrom(config: GroupsConfig, profile: string): string[] {
+	return config.excludes && has(config.excludes, profile) ? config.excludes[profile] : [];
+}
+
+/** Makes a profile not want an extension. Its groups, and every other profile, stay as they are. */
+export function excludeFromProfile(config: GroupsConfig, profile: string, id: string): GroupsConfig {
+	const name = profile.trim();
+	if (name === '') {
+		throw new Error('A profile name is required.');
+	}
+	if (!isExtensionId(id)) {
+		throw new Error(`"${id}" is not a valid extension id (expected publisher.name).`);
+	}
+	return { ...config, excludes: { ...(config.excludes ?? {}), [name]: unique([...excludedFrom(config, name), id]) } };
+}
+
+/** Takes an exclusion back. The profile and then the whole key are dropped when nothing is left. */
+export function includeInProfile(config: GroupsConfig, profile: string, id: string): GroupsConfig {
+	const key = id.toLowerCase();
+	const current = excludedFrom(config, profile);
+	if (!current.some(existing => existing.toLowerCase() === key)) {
+		return config;
+	}
+	const { excludes, ...rest } = config;
+	const { [profile]: _old, ...others } = excludes ?? {};
+	const left = current.filter(existing => existing.toLowerCase() !== key);
+	const next = left.length > 0 ? { ...others, [profile]: left } : others;
+	return Object.keys(next).length > 0 ? { ...rest, excludes: next } : rest;
 }
 
 /** The groups a profile follows: the "*" groups first, then its own. */
@@ -190,7 +230,8 @@ export function desiredExtensions(config: GroupsConfig, profile: string, matched
 			ids.push(...config.groups[name]);
 		}
 	}
-	return { ids: unique(ids), missingGroups };
+	const excluded = new Set(excludedFrom(config, profile).map(id => id.toLowerCase()));
+	return { ids: unique(ids).filter(id => !excluded.has(id.toLowerCase())), missingGroups };
 }
 
 /** What to install into a profile. It only ever adds: nothing is uninstalled or disabled. */
@@ -369,8 +410,10 @@ export interface ProfileGroupLayout {
 	name: string;
 	/** The group's extensions that the profile has, with the id as the profile reports it. */
 	installed: string[];
-	/** How many extensions the group has in all. */
+	/** How many extensions the group has for this profile (the ones the profile excludes are not counted). */
 	total: number;
+	/** The ones the profile does not have. */
+	missing: string[];
 }
 
 /**
@@ -380,16 +423,18 @@ export interface ProfileGroupLayout {
  */
 export function profileLayout(config: GroupsConfig, profile: string, installedIds: readonly string[]): { groups: ProfileGroupLayout[]; others: string[] } {
 	const byLowerCase = new Map(installedIds.map(id => [id.toLowerCase(), id]));
+	const excluded = new Set(excludedFrom(config, profile).map(id => id.toLowerCase()));
 	const inGroups = new Set<string>();
 	const groups: ProfileGroupLayout[] = [];
 	for (const name of assignedGroups(config, profile)) {
 		if (!has(config.groups, name)) {
 			continue;
 		}
-		const members = config.groups[name].map(id => id.toLowerCase());
-		const installed = members.flatMap(id => byLowerCase.get(id) ?? []);
-		members.forEach(id => inGroups.add(id));
-		groups.push({ name, installed: [...new Set(installed)], total: members.length });
+		const members = config.groups[name].filter(id => !excluded.has(id.toLowerCase()));
+		const keys = members.map(id => id.toLowerCase());
+		const installed = keys.flatMap(id => byLowerCase.get(id) ?? []);
+		keys.forEach(id => inGroups.add(id));
+		groups.push({ name, installed: [...new Set(installed)], total: members.length, missing: members.filter(id => !byLowerCase.has(id.toLowerCase())) });
 	}
 	const others = installedIds
 		.filter(id => !inGroups.has(id.toLowerCase()))

@@ -1099,8 +1099,8 @@ suite('Extension groups against a fake CLI', () => {
 				const inline = (command: string) => entries.filter(e => e.group === 'inline' && e.command === 'better-profiles.view.' + command).map(e => e.when).join(' | ');
 				assert.ok(inline('removeFromGroup').includes('viewItem == groupExtension'), 'in the Groups tree');
 				assert.ok(!inline('removeFromGroup').includes('profile'), 'not inside a profile');
-				assert.ok(inline('removeExtensionFromProfile').includes('viewItem == profileGroupExtension'), 'inside a group of a profile');
-				assert.ok(inline('removeExtensionFromProfile').includes('viewItem == profileExtension'), 'among the other extensions of a profile');
+				assert.ok(/\bprofileGroupExtension\b/.test(inline('removeExtensionFromProfile')), 'inside a group of a profile');
+				assert.ok(/\bprofileExtension\b/.test(inline('removeExtensionFromProfile')), 'among the other extensions of a profile');
 				assert.ok(inline('removeFromProfile').includes('viewItem == profileGroup'), 'on a group of a profile');
 				assert.ok(!inline('removeFromProfile').includes('viewItem == group)'), 'never on the group in the Groups tree');
 				const commands: { command: string; icon?: string }[] = contributes().commands;
@@ -1984,7 +1984,8 @@ suite('Extension groups against a fake CLI', () => {
 					answer({ confirm: () => true });
 					await removeExtension(profileGroupExt('Python', 'web', 'a.b'));
 					await sync({ profile: 'Python' });
-					assert.deepStrictEqual(installs(), []);
+					assert.ok(!installs().some(args => args.includes('a.b')), 'a.b must not come back: ' + JSON.stringify(installs()));
+					assert.ok(installs().some(args => args.includes('x.y')), 'what the profile does want is still installed');
 				});
 
 				test('the Profiles tree no longer counts it as part of the group of that profile', async () => {

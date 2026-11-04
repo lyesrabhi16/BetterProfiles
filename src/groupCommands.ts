@@ -26,8 +26,10 @@ import {
 	commonToAllProfiles,
 	desiredExtensions,
 	emptyGroups,
+	excludeFromProfile,
 	groupedExtensionIds,
 	groupsContaining,
+	includeInProfile,
 	isExtensionId,
 	parseGroups,
 	planCleanup,
@@ -39,6 +41,7 @@ import {
 	serializeGroups,
 	setTriggers,
 	triggeredGroups,
+	unassignGroup,
 } from './groups';
 
 export interface SyncReport {
@@ -53,6 +56,18 @@ export interface SyncReport {
 }
 
 type UninstallMode = 'none' | 'ask' | string[];
+
+/** What removing something from a profile did. */
+export interface RemovalReport {
+	/** Taken out of the profile. */
+	uninstalled: string[];
+	/** Left installed on purpose: this extension, what keepExtensions lists, what every profile has. */
+	kept: string[];
+	/** The command line could not uninstall them. */
+	failed: string[];
+	/** The user declined the question, and nothing was changed. */
+	cancelled: boolean;
+}
 
 export interface GroupFeatures {
 	/** The lower-case ids of the extensions that are in some group (what the Extensions view menu is told). */
@@ -114,6 +129,8 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	let grouped: readonly string[] = [];
 	const groupsChanged = new vscode.EventEmitter<void>();
+	/** A profile's own list of extensions changed (something was uninstalled from it). */
+	const profileExtensionsChanged = new vscode.EventEmitter<string>();
 
 	/**
 	 * A menu entry's label is fixed text, so group names cannot appear in the Extensions view menu. What a menu can do
@@ -382,6 +399,9 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			}
 			return done;
 		});
+		for (const done of results.filter(r => r.ok)) {
+			await forgetExclusions(done.profile, [id]);
+		}
 		const failed = results.filter(r => !r.ok);
 		void (failed.length === 0
 			? vscode.window.showInformationMessage(results.length > 0 ? `Installed ${id} into ${results.map(r => `"${r.profile}"`).join(', ')}.` : `${id} is already in the profiles you named.`)
@@ -436,19 +456,153 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return markdown;
 	};
 
-	/** Everything the profile has that its groups do not, minus what must never be offered for removal. */
-	async function findExtras(cli: CliInvocation, profile: string, config: GroupsConfig): Promise<string[]> {
+	/** What every profile has, by profile. */
+	async function listEveryProfile(cli: CliInvocation): Promise<Map<string, string[]>> {
 		const lists = new Map<string, string[]>();
 		for (const name of await profileNames()) {
 			lists.set(name, (await listExtensions(cli, run, name)).map(e => e.id));
 		}
-		const protectedIds = [
-			// installed once for every profile ("application scoped"): removing it from one removes it from all
-			...commonToAllProfiles([...lists.values()]),
-			SELF_ID,
-			...(settings().get<string[]>('keepExtensions') ?? []),
-		];
-		return planCleanup(config, profile, lists.get(profile) ?? [], protectedIds).extras;
+		return lists;
+	}
+
+	/** What must never be uninstalled from one profile, whatever asked for it. */
+	const protectedFromRemoval = (lists: Map<string, string[]>): string[] => [
+		// installed once for every profile ("application scoped"): removing it from one removes it from all
+		...commonToAllProfiles([...lists.values()]),
+		SELF_ID,
+		...(settings().get<string[]>('keepExtensions') ?? []),
+	];
+
+	/** Everything the profile has that its groups do not, minus what must never be offered for removal. */
+	async function findExtras(cli: CliInvocation, profile: string, config: GroupsConfig): Promise<string[]> {
+		const lists = await listEveryProfile(cli);
+		return planCleanup(config, profile, lists.get(profile) ?? [], protectedFromRemoval(lists)).extras;
+	}
+
+	/** Which of these the profile has, split into what can go and what must stay. */
+	async function planRemoval(cli: CliInvocation, profile: string, ids: string[]): Promise<{ remove: string[]; kept: string[] }> {
+		const lists = await listEveryProfile(cli);
+		const protectedIds = new Set(protectedFromRemoval(lists).map(lower));
+		const have = new Map((lists.get(profile) ?? []).map(id => [lower(id), id]));
+		const here = [...new Set(ids.map(lower))].flatMap(id => have.get(id) ?? []);
+		return { remove: here.filter(id => !protectedIds.has(lower(id))), kept: here.filter(id => protectedIds.has(lower(id))) };
+	}
+
+	async function uninstallAll(cli: CliInvocation, profile: string, ids: string[], report: RemovalReport): Promise<void> {
+		await withProgress(`Uninstalling from "${profile}"…`, async () => {
+			for (const id of ids) {
+				const result = await uninstallExtension(cli, run, id, profile);
+				if (result.ok) {
+					report.uninstalled.push(id);
+				} else {
+					log.error(`uninstall ${id} <- ${profile}: ${result.message}`);
+					report.failed.push(id);
+				}
+			}
+		});
+		profileExtensionsChanged.fire(profile);
+	}
+
+	const checkedProfile = async (profile: unknown): Promise<string> => {
+		const names = await profileNames();
+		if (typeof profile !== 'string' || !names.includes(profile)) {
+			throw new Error(`Unknown profile "${String(profile)}". VS Code has: ${names.join(', ')}.`);
+		}
+		return profile;
+	};
+
+	const reported = (profile: string, report: RemovalReport): void => {
+		const parts = [
+			report.uninstalled.length > 0 ? `Uninstalled ${report.uninstalled.join(', ')} from "${profile}".` : '',
+			report.kept.length > 0 ? `Kept ${report.kept.join(', ')}: this extension, what keepExtensions lists and what every profile has is never uninstalled.` : '',
+		].filter(Boolean);
+		if (report.failed.length > 0) {
+			void vscode.window.showWarningMessage(`Could not uninstall ${report.failed.join(', ')} from "${profile}". ${parts.join(' ')}`, 'Show Log').then(choice => choice && log.show());
+		} else if (parts.length > 0) {
+			void vscode.window.showInformationMessage(parts.join(' '));
+		}
+	};
+
+	/**
+	 * Makes a profile stop following a group and uninstalls the group's extensions from it, except those that another
+	 * group the profile follows still wants. The group itself and every other profile are untouched.
+	 */
+	const removeGroupFromProfile = async (args?: { profile?: string; group?: string; confirm?: boolean }): Promise<RemovalReport> => {
+		const profile = await checkedProfile(args?.profile);
+		const group = String(args?.group);
+		const { config, file } = await loadGroups();
+		const next = unassignGroup(config, profile, group);
+		const stillWanted = new Set(desiredExtensions(next, profile).ids.map(lower));
+		const excluded = new Set((config.excludes?.[profile] ?? []).map(lower));
+		const cli = resolveCliOrThrow();
+		const plan = await planRemoval(cli, profile, (config.groups[group] ?? []).filter(id => !stillWanted.has(lower(id)) && !excluded.has(lower(id))));
+		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
+
+		if (plan.remove.length > 0 && args?.confirm !== false && !await ui.confirm(
+			`Remove "${group}" from "${profile}" and uninstall ${plan.remove.length} extension${plan.remove.length === 1 ? '' : 's'} from it?`,
+			`${plan.remove.join('\n')}\n\nThey are uninstalled from "${profile}" only. The group and the other profiles are not changed.${plan.kept.length > 0 ? `\n\nStays installed: ${plan.kept.join(', ')}.` : ''}`,
+			'Remove and Uninstall',
+		)) {
+			report.cancelled = true;
+			return report;
+		}
+		await saveGroups(file, next);
+		await uninstallAll(cli, profile, plan.remove, report);
+		const alsoAll = (config.profiles[ALL_PROFILES] ?? []).includes(group);
+		void vscode.window.showInformationMessage(`"${profile}" no longer follows "${group}"${alsoAll ? ', which still goes to all profiles' : ''}.`);
+		reported(profile, report);
+		return report;
+	};
+
+	/**
+	 * Uninstalls one extension from one profile. When a group the profile follows has it, the profile is also told not to
+	 * want it (otherwise the next sync would bring it back); the group itself and the other profiles are untouched.
+	 */
+	const removeExtensionFromProfile = async (args?: { profile?: string; id?: string; confirm?: boolean }): Promise<RemovalReport> => {
+		const id = extensionIdOf(args?.id);
+		const profile = await checkedProfile(args?.profile);
+		const { config, file } = await loadGroups();
+		const wanted = desiredExtensions(config, profile).ids.some(existing => lower(existing) === lower(id));
+		const cli = resolveCliOrThrow();
+		const plan = await planRemoval(cli, profile, [id]);
+		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
+		const exclude = async () => saveGroups(file, excludeFromProfile((await loadGroups()).config, profile, id));
+
+		if (plan.kept.length > 0) {
+			reported(profile, report);
+			return report;
+		}
+		if (plan.remove.length === 0) {
+			if (wanted) {
+				await exclude(); // not installed here: only record that the profile does not want it
+			}
+			return report;
+		}
+		if (args?.confirm !== false && !await ui.confirm(
+			`Uninstall "${id}" from "${profile}"?`,
+			wanted
+				? `It stays in its group, and the other profiles keep it. "${profile}" will no longer ask for it.`
+				: `None of the groups of "${profile}" has it. It is uninstalled from this profile only.`,
+			'Uninstall',
+		)) {
+			report.cancelled = true;
+			return report;
+		}
+		await uninstallAll(cli, profile, plan.remove, report);
+		if (wanted && report.failed.length === 0) {
+			await exclude();
+		}
+		reported(profile, report);
+		return report;
+	};
+
+	/** An extension that is installed on purpose is wanted again: its exclusions for these profiles are lifted. */
+	async function forgetExclusions(profile: string, ids: readonly string[]): Promise<void> {
+		const { config, file } = await loadGroups();
+		const next = ids.reduce((updated, id) => includeInProfile(updated, profile, id), config);
+		if (next !== config) {
+			await saveGroups(file, next);
+		}
 	}
 
 	/** Offers (or, for an explicit list, applies) the removal of extras. Never removes anything without a confirmation. */
@@ -680,12 +834,15 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			logged('better-profiles.extensionAddToGroup', extensionAddToGroup),
 			logged('better-profiles.extensionRemoveFromGroup', extensionRemoveFromGroup),
 			logged('better-profiles.extensionInstallInProfiles', extensionInstallInProfiles),
+			logged('better-profiles.removeGroupFromProfile', removeGroupFromProfile),
+			logged('better-profiles.removeExtensionFromProfile', removeExtensionFromProfile),
+			profileExtensionsChanged,
 		],
 		checkSync,
 		resetPrompts,
 		groupsFilePath,
 		groupedExtensions: () => grouped,
 		refreshGroupedContext,
-		core: { loadGroups, saveGroups, profileNames, profiles: () => api.getProfiles(), resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event },
+		core: { loadGroups, saveGroups, profileNames, profiles: () => api.getProfiles(), resolveCli: resolveCliOrThrow, run, extensionsDir, onDidChangeGroups: groupsChanged.event, onDidChangeProfileExtensions: profileExtensionsChanged.event, forgetExclusions },
 	};
 }

@@ -136,6 +136,21 @@
         "command": "better-profiles.view.removeFromProfile",
         "title": "Remove From Profile",
         "icon": "$(close)"
+      },
+      {
+        "command": "better-profiles.view.removeExtensionFromProfile",
+        "title": "Remove From Profile",
+        "icon": "$(close)"
+      },
+      {
+        "command": "better-profiles.removeGroupFromProfile",
+        "title": "Remove Group From Profile",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.removeExtensionFromProfile",
+        "title": "Remove Extension From Profile",
+        "category": "Better Profiles"
       }
     ],
     "configuration": {
@@ -283,6 +298,18 @@
         {
           "command": "better-profiles.view.removeFromProfile",
           "when": "false"
+        },
+        {
+          "command": "better-profiles.view.removeExtensionFromProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.removeGroupFromProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.removeExtensionFromProfile",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -359,11 +386,6 @@
           "group": "2_copy@1"
         },
         {
-          "command": "better-profiles.view.removeFromGroup",
-          "when": "view == betterProfiles.profiles && viewItem == profileGroupExtension",
-          "group": "3_delete@1"
-        },
-        {
           "command": "better-profiles.view.assignGroup",
           "when": "view == betterProfiles.profiles && viewItem == profileGroup",
           "group": "1_modify@1"
@@ -384,8 +406,13 @@
           "group": "inline"
         },
         {
-          "command": "better-profiles.view.removeFromGroup",
-          "when": "view == betterProfiles.profiles && viewItem == profileGroupExtension",
+          "command": "better-profiles.view.removeExtensionFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem =~ /^(profileGroupExtension|profileExtension)$/",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.removeExtensionFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem =~ /^(profileGroupExtension|profileExtension)$/",
           "group": "inline"
         }
       ]
