@@ -992,6 +992,8 @@ suite('Extension groups against a fake CLI', () => {
 	suite('the Better Profiles tab', () => {
 		const GROUPS_MIME = 'application/vnd.code.tree.betterprofiles.groups';
 		const PROFILES_MIME = 'application/vnd.code.tree.betterprofiles.profiles';
+		// what the trees' own drags carry; VS Code keeps the "application/vnd.code.tree.<view>" types for itself
+		const SOURCES_MIME = 'application/vnd.better-profiles.sources';
 		const token = new vscode.CancellationTokenSource().token;
 		type Node = Record<string, unknown>;
 		const group = (name: string): Node => ({ kind: 'group', name });
@@ -1221,9 +1223,48 @@ suite('Extension groups against a fake CLI', () => {
 		suite('drag and drop', () => {
 			test('both trees accept drops from both trees', () => {
 				for (const view of ['groups', 'profiles'] as const) {
-					assert.ok(dnd(view).dropMimeTypes.includes(GROUPS_MIME), view + ' accepts groups');
-					assert.ok(dnd(view).dropMimeTypes.includes(PROFILES_MIME), view + ' accepts profiles');
+					assert.ok(dnd(view).dragMimeTypes.includes(SOURCES_MIME), view + ' drags with the shared type');
+					assert.ok(dnd(view).dropMimeTypes.includes(SOURCES_MIME), view + ' accepts the shared type');
 				}
+			});
+
+			// VS Code hands a drop between two trees a list in which its own entry for the dragged tree ("{id, itemHandles}"
+			// under "application/vnd.code.tree.<view>") sits next to ours; a drop inside one tree overwrites it, which hid this.
+			const crossTree = async (view: ViewName, nodes: Node[], tree: string) => {
+				const real = (await drag(view, nodes)).get(SOURCES_MIME)!;
+				const entries: [string, vscode.DataTransferItem][] = [
+					[tree, new vscode.DataTransferItem(JSON.stringify({ id: 'betterProfiles.' + view, itemHandles: ['0/0:Python/0:x'] }))],
+					[SOURCES_MIME, new vscode.DataTransferItem('')],
+					[SOURCES_MIME, real],
+				];
+				return {
+					get: (mime: string) => entries.find(e => e[0] === mime)?.[1],
+					forEach: (callback: (item: vscode.DataTransferItem, mime: string, self: unknown) => void) => entries.forEach(e => callback(e[1], e[0], undefined)),
+					[Symbol.iterator]: () => entries[Symbol.iterator](),
+				} as unknown as vscode.DataTransfer;
+			};
+
+			test('an extension dragged from the Profiles tree onto a group of the Groups tree is added, as VS Code delivers it', async () => {
+				await drop('groups', group('web'), await crossTree('profiles', [profileExt('Python', 'p.installed')], PROFILES_MIME));
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d', 'p.installed']);
+			});
+
+			test('an extension of a group of a profile dragged onto a group of the Groups tree is added, as VS Code delivers it', async () => {
+				await drop('groups', group('tools'), await crossTree('profiles', [profileGroupExt('Python', 'web', 'a.b')], PROFILES_MIME));
+				assert.deepStrictEqual(readGroups().groups.tools, ['x.y', 'a.b']);
+			});
+
+			test('extensions dragged from the Groups tree onto a profile are installed, as VS Code delivers it', async () => {
+				await drop('profiles', profile('Agents'), await crossTree('groups', [groupExt('web', 'a.b')], GROUPS_MIME));
+				assert.deepStrictEqual(installs(), [['--install-extension', 'a.b', '--profile', 'Agents']]);
+			});
+
+			test('a drop that only holds VS Code\'s own entry for the dragged tree changes nothing', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				const transfer = new vscode.DataTransfer();
+				transfer.set(PROFILES_MIME, new vscode.DataTransferItem(JSON.stringify({ id: 'betterProfiles.profiles', itemHandles: ['0/0:Python'] })));
+				await drop('groups', group('web'), transfer);
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
 			});
 
 			test('an extension of a profile dropped on a group is added to it, without running any CLI', async () => {
@@ -1295,7 +1336,7 @@ suite('Extension groups against a fake CLI', () => {
 				const before = fs.readFileSync(groupsFile, 'utf8');
 				await drop('groups', undefined, await drag('profiles', [profileExt('Python', 'p.installed')]));
 				const nothing = await drag('profiles', [profile('Python'), { kind: 'message', text: 'hello' }]);
-				assert.strictEqual(nothing.get(PROFILES_MIME), undefined, 'profiles and messages are not draggable');
+				assert.strictEqual(nothing.get(SOURCES_MIME), undefined, 'profiles and messages are not draggable');
 				await drop('groups', group('web'), nothing);
 				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
 				assert.deepStrictEqual(calls(), []);
@@ -1303,7 +1344,7 @@ suite('Extension groups against a fake CLI', () => {
 
 			test('a drop whose items arrive as text still works', async () => {
 				const transfer = new vscode.DataTransfer();
-				transfer.set(PROFILES_MIME, new vscode.DataTransferItem(JSON.stringify([{ kind: 'extension', id: 'p.installed', from: { type: 'profile', name: 'Python' } }])));
+				transfer.set(SOURCES_MIME, new vscode.DataTransferItem(JSON.stringify([{ kind: 'extension', id: 'p.installed', from: { type: 'profile', name: 'Python' } }])));
 				await drop('groups', group('web'), transfer);
 				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d', 'p.installed']);
 			});
@@ -1311,8 +1352,8 @@ suite('Extension groups against a fake CLI', () => {
 			test('a drop with garbage in it is ignored without an error', async () => {
 				const before = fs.readFileSync(groupsFile, 'utf8');
 				const transfer = new vscode.DataTransfer();
-				transfer.set(GROUPS_MIME, new vscode.DataTransferItem('not json at all'));
-				transfer.set(PROFILES_MIME, new vscode.DataTransferItem(JSON.stringify([{ kind: 'extension', id: 5 }, { kind: 'group' }, 'x', null])));
+				transfer.set(PROFILES_MIME, new vscode.DataTransferItem('not json at all'));
+				transfer.set(SOURCES_MIME, new vscode.DataTransferItem(JSON.stringify([{ kind: 'extension', id: 5 }, { kind: 'group' }, 'x', null])));
 				await drop('groups', group('web'), transfer);
 				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
 			});
