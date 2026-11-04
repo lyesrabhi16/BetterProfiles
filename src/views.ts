@@ -133,7 +133,9 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 	invalidate(profile: string): void {
 		this.cache.delete(profile);
 		this.catalog.clear(); // an install adds a folder
-		this.changed.fire({ kind: 'profile', name: profile });
+		// The whole tree: VS Code only knows the item objects it was given, and a new object for the profile is ignored
+		// (it would leave the old list on screen). Open profiles stay open, so nothing is lost by redrawing all of it.
+		this.changed.fire();
 	}
 
 	private extensionsOf(profile: string): Promise<InstalledExtension[]> {

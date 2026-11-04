@@ -87,11 +87,15 @@ The groups live in one file shared by every profile (VS Code settings are per pr
   "profiles": {
     "*": ["web"],
     "Python": ["python"]
+  },
+  "excludes": {
+    "Python": ["esbenp.prettier-vscode"]
   }
 }
 ```
 
-`"*"` means every profile; `Default` is the default profile. The file is in this extension's global storage unless
+`"*"` means every profile; `Default` is the default profile. `"excludes"` (optional) lists extensions a profile does not want although a
+group it follows has them; it is written by **Remove From Profile** on an extension. The file is in this extension's global storage unless
 `betterProfiles.groupsFile` points elsewhere (for example into a dotfiles repository).
 
 Extensions VS Code installs once for all profiles ("application scoped") count as present everywhere, and they
@@ -124,12 +128,26 @@ says, not what is installed in each profile (the Profiles tree has that).
 extension about clicks, so two clicks within half a second on the same item count as a double click; if VS Code is set to open
 items on a double click (`workbench.list.openMode`), its own double click is used.
 
-**Right-click** an extension for **Open Extension Page**, **Add to Group**, **Install in Other Profiles**, **Copy Extension Id**
-and, when it is shown inside a group, **Remove From Group** (nothing is uninstalled). Right-click a group in the Groups tree for
-**Give To A Profile**, **Set Workspace Triggers** and **Delete Group** (the group itself); a group inside a profile has the first two
-and **Remove From Profile**, which only makes that profile stop following it (the group and the installed extensions stay; a group
-given to all profiles offers to remove it from all instead). A profile has **Sync Profile With Its Groups**. The quick **×** button
-removes an extension from its group, and a group from its profile, in one click.
+**Right-click** an extension for **Open Extension Page**, **Add to Group**, **Install in Other Profiles** and **Copy Extension Id**.
+In the Groups tree it also has **Remove From Group** (it only edits the groups file; nothing is uninstalled). In the Profiles tree it has
+**Remove From Profile** instead, which never touches the group the other profiles share:
+
+- on an extension, it asks, then uninstalls it from that profile only. If a group the profile follows has it, the profile is also
+  told not to want it (an `"excludes"` entry in the groups file, see below), so the next sync does not bring it back. Installing it
+  into that profile again lifts the exclusion.
+- on a group inside a profile, it asks, then makes the profile stop following the group and uninstalls the group's extensions from it,
+  except those that another group the profile follows (or a group given to all profiles) still wants. The group and the other profiles
+  stay as they are. A group that goes to all profiles cannot leave just one: it offers to remove it from all profiles, without
+  uninstalling anything.
+
+These never uninstall this extension, anything listed in `betterProfiles.keepExtensions`, or anything installed in every profile (VS Code
+installs those once for all of them). Anything else the command line cannot remove is reported. VS Code has no command or API to delete
+or create a profile (only its own screens do), so removing a profile and rebuilding it is not something this extension can do; and it
+would lose the profile's settings, keybindings and snippets.
+
+Right-click a group in the Groups tree for **Give To A Profile**, **Set Workspace Triggers** and **Delete Group** (the group itself); a
+group inside a profile has the first two and **Remove From Profile**. A profile has **Sync Profile With Its Groups**. The quick **×**
+button does the same as the right-click entry that removes (from the group in the Groups tree, from the profile in the Profiles tree).
 
 Drag and drop works between the two trees and inside them:
 

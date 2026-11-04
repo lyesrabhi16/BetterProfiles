@@ -11,6 +11,8 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- The Profiles tree kept showing a profile's old list of extensions after something was installed into or uninstalled from it: the
+  refresh named an item object VS Code did not know and was ignored. It now redraws the whole tree.
 - The **New Group** button of the Groups view did not ask for a name when a group was selected: VS Code runs a title-bar
   button with the item that is focused in the tree, and the command took that group's name as the new name ("There is already a
   group ..."). It now always asks. A program can still pass `{ groupName }`.
@@ -31,6 +33,11 @@ All notable changes to the "better-profiles" extension are documented here.
 
 - A graph view of extensions, groups and profiles, opened from a button at the top of the Better Profiles tab or with
   `Better Profiles: Show Graph`. Pointing at a node lights up what it connects to; clicking an extension opens its page.
+- **Remove From Profile** now uninstalls. On an extension inside a profile it uninstalls it from that profile only and records an
+  `"excludes"` entry so a sync does not bring it back; the real group and the other profiles are untouched. On a group inside a profile
+  it makes the profile stop following the group and uninstalls the group's extensions from it, except those another followed group still
+  wants. Both ask first, and never uninstall this extension, `keepExtensions` or what every profile has. In the Profiles tree the
+  extension entries no longer offer Remove From Group (that edits the real group and is only in the Groups tree).
 - A group shown inside a profile has **Remove From Profile** (a right-click entry and a quick **×** button) instead of Delete Group:
   the profile stops following the group, which and whose extensions stay. Extensions inside such a group have the quick **×** too.
 - Double-clicking an extension in the Better Profiles tab opens its page. Right-clicking an extension offers Open Extension Page,
