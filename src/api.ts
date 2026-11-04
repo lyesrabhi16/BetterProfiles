@@ -25,6 +25,8 @@ export interface PromptUi {
 	 * in the result (so a result can hold names that were not in `items`).
 	 */
 	pickMany(title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }): Promise<string[] | undefined>;
+	/** A typed name. Resolves to the text, or undefined when cancelled. */
+	input(prompt: string): Promise<string | undefined>;
 	/** A modal confirmation. */
 	confirm(message: string, detail: string, action: string): Promise<boolean>;
 }

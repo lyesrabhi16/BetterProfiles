@@ -384,8 +384,11 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 				profiles.refresh();
 			}),
 
-			command('better-profiles.view.newGroup', async (arg?: { name?: string }) => {
-				const typed = arg?.name ?? await vscode.window.showInputBox({ prompt: 'Name of the new group', validateInput: v => (v.trim() ? undefined : 'A name is required.') });
+			// A button in a view's title bar is run with the item that is focused in the tree, which has a `name` of its own:
+			// the name is only taken from `groupName`, never from what the command is given by the tree.
+			command('better-profiles.view.newGroup', async (arg?: { groupName?: unknown }) => {
+				const given = typeof arg?.groupName === 'string' ? arg.groupName : undefined;
+				const typed = given ?? await ui.input('Name of the new group');
 				const name = typed?.trim();
 				if (!name) {
 					return;

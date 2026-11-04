@@ -11,6 +11,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- The **New Group** button of the Groups view did not ask for a name when a group was selected: VS Code runs a title-bar
+  button with the item that is focused in the tree, and the command took that group's name as the new name ("There is already a
+  group ..."). It now always asks. A program can still pass `{ groupName }`.
 - The Profiles tree of the Better Profiles tab did not follow changes to the groups: a group given to a profile (by a drop,
   a command or the groups file) only showed in it after Refresh. It now redraws at once, without asking the command line again.
 - Dragging from one tree of the Better Profiles tab onto the other did nothing (an extension onto a group, a group onto a
