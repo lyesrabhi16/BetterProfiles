@@ -4,6 +4,8 @@
 export interface GroupsConfig {
 	groups: Record<string, string[]>;
 	profiles: Record<string, string[]>;
+	/** group name -> globs. A group with triggers is only wanted automatically where the workspace matches one. */
+	triggers?: Record<string, string[]>;
 }
 
 /** The `profiles` key whose groups apply to every profile. */
@@ -123,7 +125,7 @@ export function assignGroup(config: GroupsConfig, profile: string, group: string
 }
 
 /** The groups a profile follows: the "*" groups first, then its own. */
-function assignedGroups(config: GroupsConfig, profile: string): string[] {
+export function assignedGroups(config: GroupsConfig, profile: string): string[] {
 	return unique([
 		...(has(config.profiles, ALL_PROFILES) ? config.profiles[ALL_PROFILES] : []),
 		...(profile !== ALL_PROFILES && has(config.profiles, profile) ? config.profiles[profile] : []),
@@ -131,7 +133,7 @@ function assignedGroups(config: GroupsConfig, profile: string): string[] {
 }
 
 /** The extensions a profile should have, and the groups it refers to that do not exist. */
-export function desiredExtensions(config: GroupsConfig, profile: string): { ids: string[]; missingGroups: string[] } {
+export function desiredExtensions(config: GroupsConfig, profile: string, _matched?: readonly string[]): { ids: string[]; missingGroups: string[] } {
 	const ids: string[] = [];
 	const missingGroups: string[] = [];
 	for (const name of assignedGroups(config, profile)) {
@@ -145,8 +147,8 @@ export function desiredExtensions(config: GroupsConfig, profile: string): { ids:
 }
 
 /** What to install into a profile. It only ever adds: nothing is uninstalled or disabled. */
-export function planSync(config: GroupsConfig, profile: string, installedIds: string[]): SyncPlan {
-	const { ids, missingGroups } = desiredExtensions(config, profile);
+export function planSync(config: GroupsConfig, profile: string, installedIds: string[], matched?: readonly string[]): SyncPlan {
+	const { ids, missingGroups } = desiredExtensions(config, profile, matched);
 	const installed = new Set(installedIds.map(id => id.toLowerCase()));
 	return {
 		toInstall: ids.filter(id => !installed.has(id.toLowerCase())),
@@ -224,4 +226,19 @@ export function commonToAllProfiles(lists: string[][]): string[] {
 /** Identifies a set of ids, so "Not now" can be remembered for exactly that set. */
 export function promptKey(ids: string[]): string {
 	return unique(ids).map(id => id.toLowerCase()).sort().join(',');
+}
+
+/** A glob relative to a workspace folder. No absolute paths, no "..", no backslashes. */
+export function isTriggerPattern(_text: string): boolean {
+	throw new Error('not implemented');
+}
+
+/** Replaces the triggers of an existing group; an empty list removes them. */
+export function setTriggers(_config: GroupsConfig, _group: string, _patterns: string[]): GroupsConfig {
+	throw new Error('not implemented');
+}
+
+/** The groups this profile follows that have triggers, with their patterns. */
+export function triggeredGroups(_config: GroupsConfig, _profile: string): { group: string; patterns: string[] }[] {
+	throw new Error('not implemented');
 }

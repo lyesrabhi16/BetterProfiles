@@ -77,7 +77,7 @@ suite('Extension groups against a fake CLI', () => {
 	});
 
 	suite('commands', () => {
-		const IDS = ['editGroups', 'addToGroup', 'assignGroup', 'compareProfiles', 'syncProfile', 'resetPrompts'].map(c => `better-profiles.${c}`);
+		const IDS = ['editGroups', 'addToGroup', 'assignGroup', 'compareProfiles', 'syncProfile', 'resetPrompts', 'setGroupTriggers'].map(c => `better-profiles.${c}`);
 
 		test('are contributed to the palette and registered', async () => {
 			const ext = vscode.extensions.getExtension(EXTENSION_ID)!;
@@ -457,6 +457,97 @@ suite('Extension groups against a fake CLI', () => {
 			await sync({ profile: 'Python', confirm: false, uninstall: 'ask' });
 			const order = calls().filter(a => a.includes('--install-extension') || a.includes('--uninstall-extension')).map(a => a[0]);
 			assert.deepStrictEqual(order, ['--install-extension', '--uninstall-extension']);
+		});
+	});
+
+
+	suite('install when needed: workspace triggers', () => {
+		const MATCHES = '**/README.md'; // exists in the fixture workspace
+		const NO_MATCH = '**/pubspec.yaml'; // does not
+
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			await api.resetPrompts();
+			await set('autoSync', 'ask');
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		test('setGroupTriggers writes the patterns of an existing group', async () => {
+			writeGroups({ groups: { flutter: ['f.one'] } });
+			await exec('better-profiles.setGroupTriggers', { group: 'flutter', patterns: ['**/pubspec.yaml', 'lib/*.dart'] });
+			assert.deepStrictEqual((readGroups() as GroupsConfig).triggers, { flutter: ['**/pubspec.yaml', 'lib/*.dart'] });
+			await exec('better-profiles.setGroupTriggers', { group: 'flutter', patterns: [] });
+			assert.ok(!('triggers' in readGroups()), 'an empty list removes them');
+		});
+
+		test('setGroupTriggers refuses a bad pattern and an unknown group, and writes nothing', async () => {
+			writeGroups({ groups: { flutter: ['f.one'] } });
+			const before = fs.readFileSync(groupsFile, 'utf8');
+			await assert.rejects(exec('better-profiles.setGroupTriggers', { group: 'flutter', patterns: ['../outside'] }), /pattern/i);
+			await assert.rejects(exec('better-profiles.setGroupTriggers', { group: 'ghost', patterns: ['**/x'] }), /no group/i);
+			assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+		});
+
+		test('a group whose trigger matches this workspace is offered, and the notification says why', async () => {
+			writeGroups({ groups: { flutter: ['f.one', 'f.two'] }, profiles: { Python: ['flutter'] }, triggers: { flutter: [MATCHES] } } as Partial<GroupsConfig>);
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 1);
+			assert.ok(seen.ask[0].message.includes('Python') && seen.ask[0].message.includes('2'), seen.ask[0].message);
+			assert.ok(seen.ask[0].message.includes('flutter'), 'it should name the group this workspace matched: ' + seen.ask[0].message);
+		});
+
+		test('a group whose trigger does not match is not offered, and no CLI is even started', async () => {
+			writeGroups({ groups: { flutter: ['f.one'] }, profiles: { Python: ['flutter'] }, triggers: { flutter: [NO_MATCH] } } as Partial<GroupsConfig>);
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+			assert.deepStrictEqual(calls(), []);
+		});
+
+		test('only the groups this workspace needs are counted and installed', async () => {
+			writeGroups({
+				groups: { py: ['p.installed', 'p.new'], flutter: ['f.one'] },
+				profiles: { Python: ['py', 'flutter'] },
+				triggers: { flutter: [NO_MATCH] },
+			} as Partial<GroupsConfig>);
+			answer({ ask: () => 'Sync' });
+			await api.checkSync();
+			assert.ok(seen.ask[0].message.includes('1 extension'), seen.ask[0].message);
+			assert.deepStrictEqual(installs(), [['--install-extension', 'p.new', '--profile', 'Python']]);
+			assert.ok(!readState().Python.includes('f.one'));
+		});
+
+		test('autoSync "auto" installs only what this workspace needs', async () => {
+			await set('autoSync', 'auto');
+			writeGroups({
+				groups: { flutter: ['f.one'], other: ['o.one'] },
+				profiles: { Python: ['flutter', 'other'] },
+				triggers: { flutter: [MATCHES], other: [NO_MATCH] },
+			} as Partial<GroupsConfig>);
+			await api.checkSync();
+			assert.strictEqual(seen.ask.length, 0);
+			assert.deepStrictEqual(installs().map(a => a[1]), ['f.one']);
+		});
+
+		test('an explicit sync installs every group of the profile, triggers or not', async () => {
+			writeGroups({
+				groups: { py: ['p.new'], flutter: ['f.one'] },
+				profiles: { Python: ['py', 'flutter'] },
+				triggers: { flutter: [NO_MATCH] },
+			} as Partial<GroupsConfig>);
+			const report = await sync({ profile: 'Python' });
+			assert.deepStrictEqual(report.plan.toInstall.sort(), ['f.one', 'p.new']);
+		});
+
+		test('cleanup never offers the extensions of a group this workspace does not currently need', async () => {
+			writeState({ Default: [], Python: ['p.installed', 'f.installed', 'extra.a'], Agents: [] });
+			writeGroups({
+				groups: { py: ['p.installed'], flutter: ['f.installed'] },
+				profiles: { Python: ['py', 'flutter'] },
+				triggers: { flutter: [NO_MATCH] },
+			} as Partial<GroupsConfig>);
+			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['extra.a']);
 		});
 	});
 

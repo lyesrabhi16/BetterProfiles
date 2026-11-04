@@ -3,6 +3,10 @@ import {
 	ALL_PROFILES,
 	GroupsConfig,
 	addToGroup,
+	assignedGroups,
+	isTriggerPattern,
+	setTriggers,
+	triggeredGroups,
 	commonToAllProfiles,
 	planCleanup,
 	promptKey,
@@ -279,5 +283,153 @@ suite('promptKey', () => {
 
 	test('an empty set has a stable key', () => {
 		assert.strictEqual(promptKey([]), promptKey([]));
+	});
+});
+
+suite('isTriggerPattern', () => {
+	test('accepts globs relative to a workspace folder', () => {
+		for (const p of ['pubspec.yaml', '**/pubspec.yaml', '*.py', 'src/**/*.ts', '**/{a,b}.json', 'docs/*.md']) {
+			assert.ok(isTriggerPattern(p), p);
+		}
+	});
+
+	test('rejects empty, absolute, parent-escaping, backslashed, NUL-containing and absurdly long patterns', () => {
+		for (const p of ['', '   ', '/etc/passwd', '/**/x', '../x', 'a/../b', '..', 'C:\\x', 'C:/x', 'a\\b', 'a\0b', 'x'.repeat(300)]) {
+			assert.ok(!isTriggerPattern(p), JSON.stringify(p));
+		}
+	});
+});
+
+suite('triggers in the groups file', () => {
+	test('are read per group', () => {
+		const { config: c, warnings } = parseGroups(JSON.stringify({
+			groups: { flutter: ['dart-code.flutter'] },
+			triggers: { flutter: ['**/pubspec.yaml', 'lib/*.dart'] },
+		}));
+		assert.deepStrictEqual(c.triggers, { flutter: ['**/pubspec.yaml', 'lib/*.dart'] });
+		assert.deepStrictEqual(warnings, []);
+	});
+
+	test('a file without triggers has no triggers key at all (so the config stays minimal)', () => {
+		assert.ok(!('triggers' in parseGroups(JSON.stringify({ groups: { g: ['a.b'] } })).config));
+		assert.ok(!('triggers' in parseGroups('{}').config));
+	});
+
+	test('invalid patterns are dropped with a warning that names the group', () => {
+		const { config: c, warnings } = parseGroups(JSON.stringify({ groups: { g: ['a.b'] }, triggers: { g: ['**/ok.txt', '/etc/passwd', '../x', 5, ''] } }));
+		assert.deepStrictEqual(c.triggers, { g: ['**/ok.txt'] });
+		assert.strictEqual(warnings.length, 4);
+		assert.ok(warnings.every(w => w.includes('"g"')), warnings.join('|'));
+	});
+
+	test('a group whose triggers are all invalid ends up with none rather than an empty list', () => {
+		const { config: c } = parseGroups(JSON.stringify({ groups: { g: ['a.b'] }, triggers: { g: ['/abs'] } }));
+		assert.ok(!c.triggers || !('g' in c.triggers));
+	});
+
+	test('triggers that are not a list are ignored with a warning', () => {
+		const { config: c, warnings } = parseGroups(JSON.stringify({ groups: { g: ['a.b'] }, triggers: { g: '**/x' } }));
+		assert.ok(!c.triggers || !('g' in c.triggers));
+		assert.strictEqual(warnings.length, 1);
+	});
+
+	test('triggers for a group that does not exist are kept, with a warning', () => {
+		const { config: c, warnings } = parseGroups(JSON.stringify({ groups: {}, triggers: { ghost: ['**/x'] } }));
+		assert.deepStrictEqual(c.triggers, { ghost: ['**/x'] });
+		assert.strictEqual(warnings.length, 1);
+		assert.ok(warnings[0].includes('"ghost"'));
+	});
+
+	test('round-trip through serializeGroups', () => {
+		const c: GroupsConfig = { groups: { f: ['a.b'] }, profiles: {}, triggers: { f: ['**/pubspec.yaml'] } };
+		assert.deepStrictEqual(parseGroups(serializeGroups(c)).config, c);
+	});
+
+	test('addToGroup and assignGroup keep the triggers', () => {
+		const c: GroupsConfig = { groups: { f: ['a.b'] }, profiles: {}, triggers: { f: ['**/pubspec.yaml'] } };
+		assert.deepStrictEqual(addToGroup(c, 'f', ['c.d']).triggers, c.triggers);
+		assert.deepStrictEqual(assignGroup(c, 'Mobile', 'f').triggers, c.triggers);
+	});
+});
+
+suite('setTriggers', () => {
+	const base = config({ flutter: ['a.b'] });
+
+	test('sets the patterns of an existing group and leaves the original alone', () => {
+		const next = setTriggers(base, 'flutter', ['**/pubspec.yaml']);
+		assert.deepStrictEqual(next.triggers, { flutter: ['**/pubspec.yaml'] });
+		assert.ok(!('triggers' in base));
+	});
+
+	test('replaces earlier patterns, removes duplicates and trims', () => {
+		const once = setTriggers(base, 'flutter', ['**/a', '**/b']);
+		assert.deepStrictEqual(setTriggers(once, 'flutter', [' **/c ', '**/c']).triggers, { flutter: ['**/c'] });
+	});
+
+	test('an empty list removes the triggers, and the triggers key when none are left', () => {
+		const once = setTriggers(base, 'flutter', ['**/a']);
+		assert.ok(!('triggers' in setTriggers(once, 'flutter', [])));
+	});
+
+	test('refuses an invalid pattern and an unknown group', () => {
+		assert.throws(() => setTriggers(base, 'flutter', ['../x']), /pattern/i);
+		assert.throws(() => setTriggers(base, 'nope', ['**/x']), /no group/i);
+	});
+});
+
+suite('triggeredGroups / assignedGroups', () => {
+	const c: GroupsConfig = {
+		groups: { common: ['c.one'], flutter: ['f.one'], py: ['p.one'] },
+		profiles: { '*': ['common'], Mobile: ['flutter', 'py'] },
+		triggers: { flutter: ['**/pubspec.yaml'], py: ['**/*.py'], common: [] },
+	};
+
+	test('assignedGroups is "*" first, then the profile, without duplicates', () => {
+		assert.deepStrictEqual(assignedGroups(c, 'Mobile'), ['common', 'flutter', 'py']);
+		assert.deepStrictEqual(assignedGroups(c, 'Other'), ['common']);
+	});
+
+	test('triggeredGroups lists only the profile groups that have triggers', () => {
+		assert.deepStrictEqual(triggeredGroups(c, 'Mobile'), [
+			{ group: 'flutter', patterns: ['**/pubspec.yaml'] },
+			{ group: 'py', patterns: ['**/*.py'] },
+		]);
+		assert.deepStrictEqual(triggeredGroups(c, 'Other'), []);
+	});
+
+	test('a config without triggers has none', () => {
+		assert.deepStrictEqual(triggeredGroups(config({ g: ['a.b'] }, { P: ['g'] }), 'P'), []);
+	});
+});
+
+suite('wanted extensions where a workspace matches only some triggers', () => {
+	const c: GroupsConfig = {
+		groups: { common: ['c.one'], flutter: ['f.one', 'f.two'], py: ['p.one'] },
+		profiles: { Mobile: ['common', 'flutter', 'py'] },
+		triggers: { flutter: ['**/pubspec.yaml'], py: ['**/*.py'] },
+	};
+
+	test('without match information every assigned group counts (an explicit sync)', () => {
+		assert.deepStrictEqual(desiredExtensions(c, 'Mobile').ids, ['c.one', 'f.one', 'f.two', 'p.one']);
+	});
+
+	test('a triggered group counts only when it matched; groups without triggers always count', () => {
+		assert.deepStrictEqual(desiredExtensions(c, 'Mobile', ['flutter']).ids, ['c.one', 'f.one', 'f.two']);
+		assert.deepStrictEqual(desiredExtensions(c, 'Mobile', []).ids, ['c.one']);
+	});
+
+	test('match names that the profile does not follow are ignored', () => {
+		assert.deepStrictEqual(desiredExtensions(c, 'Mobile', ['ghost']).ids, ['c.one']);
+	});
+
+	test('planSync carries the match information through', () => {
+		const plan = planSync(c, 'Mobile', ['c.one'], ['flutter']);
+		assert.deepStrictEqual(plan.toInstall, ['f.one', 'f.two']);
+		assert.deepStrictEqual(planSync(c, 'Mobile', ['c.one'], []).toInstall, []);
+	});
+
+	test('cleanup still sees every assigned group, so a group this workspace does not need is never offered for removal', () => {
+		const plan = planCleanup(c, 'Mobile', ['c.one', 'f.one', 'p.one', 'x.extra'], []);
+		assert.deepStrictEqual(plan.extras, ['x.extra']);
 	});
 });
