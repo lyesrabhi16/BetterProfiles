@@ -70,7 +70,7 @@ suite('Extension groups against a fake CLI', () => {
 	});
 
 	teardown(async () => {
-		for (const key of ['storageFile', 'groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions']) {
+		for (const key of ['storageFile', 'groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions', 'extensionsDir']) {
 			await set(key, undefined);
 		}
 		fs.rmSync(dir, { recursive: true, force: true });
@@ -89,7 +89,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		test('their settings are declared', () => {
 			const props = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes?.configuration?.properties ?? {};
-			for (const key of ['groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions']) {
+			for (const key of ['groupsFile', 'codeCommand', 'codeArgs', 'autoSync', 'keepExtensions', 'extensionsDir']) {
 				assert.ok(`betterProfiles.${key}` in props, key);
 			}
 		});
@@ -1215,6 +1215,79 @@ suite('Extension groups against a fake CLI', () => {
 				await drop('groups', group('web'), await drag('profiles', [profileExt('Python', 'p.installed')]));
 				assert.ok(await until(() => fired > 0));
 				subscription?.dispose();
+			});
+		});
+
+		suite('how extensions are shown', () => {
+			const FIXTURE = path.resolve(__dirname, '../../test-fixtures/extensions');
+			const forget = () => { api.views.groups.refresh(); api.views.profiles.refresh(); };
+
+			setup(async () => {
+				await set('extensionsDir', FIXTURE);
+				forget();
+			});
+			teardown(forget);
+
+			test('a group extension shows its icon image and its display name, like the Extensions list', async () => {
+				const i = await item('groups', groupExt('web', 'aaron-bond.better-comments'));
+				assert.strictEqual(label(i), 'Better Comments');
+				assert.ok(i.iconPath instanceof vscode.Uri, 'the icon should be the extension\'s own image');
+				assert.ok((i.iconPath as vscode.Uri).fsPath.endsWith(path.join('images', 'icon.png')), String((i.iconPath as vscode.Uri).fsPath));
+				assert.strictEqual(i.description, 'aaron-bond');
+				assert.ok(String(i.tooltip).includes('aaron-bond.better-comments') && String(i.tooltip).includes('Improve your code commenting'), String(i.tooltip));
+			});
+
+			test('a localised display name is resolved', async () => {
+				assert.strictEqual(label(await item('groups', groupExt('web', 'p.installed'))), 'Installed Thing');
+			});
+
+			test('without a display name the name is shown, and without an icon the generic extension icon', async () => {
+				const i = await item('groups', groupExt('web', 'x.plain'));
+				assert.strictEqual(label(i), 'plain');
+				assert.ok(i.iconPath instanceof vscode.ThemeIcon);
+			});
+
+			test('an extension installed nowhere is shown by its id and says so', async () => {
+				const i = await item('groups', groupExt('web', 'not.installed'));
+				assert.strictEqual(label(i), 'not.installed');
+				assert.strictEqual(i.description, 'not installed');
+			});
+
+			test('an extension of a profile shows the same icon and name, with the version the command line reports', async () => {
+				writeState({ Default: [], Python: ['aaron-bond.better-comments'], Agents: [] });
+				const [node] = await children('profiles', profile('Python'));
+				const i = await item('profiles', node);
+				assert.strictEqual(label(i), 'Better Comments');
+				assert.ok(i.iconPath instanceof vscode.Uri);
+				assert.strictEqual(i.description, '1.0.0');
+			});
+
+			test('a version with a platform finds its platform-specific folder', async () => {
+				const i = await item('profiles', { kind: 'profileExtension', profile: 'Python', id: 'y.native', version: '1.2.3@linux-x64' });
+				assert.strictEqual(label(i), 'Native Thing');
+			});
+
+			test('Refresh makes it look at the extensions folder again', async () => {
+				const dynamic = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-ext-'));
+				try {
+					await set('extensionsDir', dynamic);
+					forget();
+					assert.strictEqual(label(await item('groups', groupExt('web', 'late.comer'))), 'late.comer');
+					fs.mkdirSync(path.join(dynamic, 'late.comer-1.0.0'));
+					fs.writeFileSync(path.join(dynamic, 'late.comer-1.0.0', 'package.json'), JSON.stringify({ name: 'late-comer', displayName: 'Late Comer', publisher: 'late', version: '1.0.0' }));
+					forget();
+					assert.strictEqual(label(await item('groups', groupExt('web', 'late.comer'))), 'Late Comer');
+				} finally {
+					fs.rmSync(dynamic, { recursive: true, force: true });
+				}
+			});
+
+			test('with no extensions folder to read, everything is still shown by its id', async () => {
+				await set('extensionsDir', undefined);
+				forget();
+				const i = await item('groups', groupExt('web', 'aaron-bond.better-comments'));
+				assert.strictEqual(label(i), 'aaron-bond.better-comments');
+				assert.ok(i.iconPath instanceof vscode.ThemeIcon);
 			});
 		});
 
