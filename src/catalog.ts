@@ -131,9 +131,22 @@ async function readInfo(folder: string): Promise<ExtensionInfo | undefined> {
 	return info;
 }
 
+/** A plain folder name: no separators, no "..", not absolute. */
+const isPlainName = (text: unknown): text is string =>
+	typeof text === 'string' && text !== '' && text !== '.' && text !== '..' && !/[\\/]/.test(text) && !path.isAbsolute(text);
+
+/**
+ * What the extensions folder says about each extension. Like git with its index, it looks again only at what changed: an
+ * extension's manifest is read once and trusted while its size and time stay as they were, so `clear` costs one look at the
+ * folder, not a read of every extension.
+ */
 export class ExtensionCatalog {
 	private listing: { dir: string; folders: Promise<string[]> } | undefined;
-	private readonly read = new Map<string, Promise<ExtensionInfo | undefined>>();
+	/** The folder the manifests below were read from: another folder means they are of no use. */
+	private readFrom: string | undefined;
+	private readonly read = new Map<string, { mtimeMs: number; info: Promise<ExtensionInfo | undefined> }>();
+	/** For the tests: how many times the folder was listed and how many manifests were read. */
+	readonly stats = { listings: 0, manifests: 0 };
 
 	constructor(private readonly dir: () => string | undefined) { }
 
@@ -142,31 +155,54 @@ export class ExtensionCatalog {
 		return this.dir() !== undefined;
 	}
 
-	/** Forgets what was read, so the next lookup sees the extensions folder as it is then. */
+	/** Makes the next lookup look at the extensions folder again (for new extensions). What was read of an extension stays. */
 	clear(): void {
 		this.listing = undefined;
-		this.read.clear();
 	}
 
-	async lookup(id: string, version?: string): Promise<ExtensionInfo | undefined> {
+	/** The manifest of one extension folder, read again only when it changed. */
+	private async infoOf(full: string): Promise<ExtensionInfo | undefined> {
+		let mtimeMs: number;
+		try {
+			mtimeMs = (await fs.stat(path.join(full, 'package.json'))).mtimeMs;
+		} catch {
+			this.read.delete(full);
+			return undefined;
+		}
+		const known = this.read.get(full);
+		if (known && known.mtimeMs === mtimeMs) {
+			return known.info;
+		}
+		this.stats.manifests++;
+		const info = readInfo(full);
+		this.read.set(full, { mtimeMs, info });
+		return info;
+	}
+
+	/** `folder` is where the caller already knows the extension is (VS Code's own list says): then nothing is listed. */
+	async lookup(id: string, version?: string, folder?: string): Promise<ExtensionInfo | undefined> {
 		const dir = this.dir();
 		if (!dir) {
 			return undefined;
 		}
-		if (this.listing?.dir !== dir) {
-			this.listing = { dir, folders: fs.readdir(dir).catch(() => [] as string[]) };
+		if (this.readFrom !== dir) {
 			this.read.clear();
+			this.readFrom = dir;
 		}
-		const folder = pickFolder(await this.listing.folders, id, version);
-		if (!folder) {
-			return undefined;
+		if (isPlainName(folder)) {
+			const named = await this.infoOf(path.join(dir, folder));
+			if (named) {
+				return named;
+			}
 		}
-		const full = path.join(dir, folder);
-		let pending = this.read.get(full);
-		if (!pending) {
-			pending = readInfo(full);
-			this.read.set(full, pending);
+		if (this.readFrom !== dir) {
+			this.read.clear();
+			this.readFrom = dir;
 		}
-		return pending;
+		if (this.listing?.dir !== dir) {
+			this.listing = { dir, folders: (this.stats.listings++, fs.readdir(dir).catch(() => [] as string[])) };
+		}
+		const picked = pickFolder(await this.listing.folders, id, version);
+		return picked ? this.infoOf(path.join(dir, picked)) : undefined;
 	}
 }
