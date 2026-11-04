@@ -33,6 +33,18 @@ suite('graphHtml', () => {
 		assert.ok(!html.includes('innerHTML'), 'names come from other people\'s extensions and from the groups file');
 	});
 
+	test('the sources VS Code gives are kept whole (quotes, a space, a wildcard), or its images would be blocked', () => {
+		const real = graphHtml('abc123', "'self' https://*.vscode-cdn.net");
+		assert.ok(real.includes("img-src 'self' https://*.vscode-cdn.net data:"), 'the policy needs them as they are');
+	});
+
+	test('what could end the attribute or the policy is dropped from the sources', () => {
+		const odd = graphHtml('abc123', 'https://x.net"; script-src * <b>');
+		const csp = /content="([^"]+)"/.exec(odd)?.[1] ?? '';
+		assert.ok(!csp.includes(';  script') && csp.split(';').length === 5, csp);
+		assert.ok(!odd.includes('<b>'));
+	});
+
 	test('a nonce or origin cannot break out of the policy', () => {
 		const odd = graphHtml('a"b', 'x" y');
 		assert.ok(!odd.includes('nonce-a"b'));

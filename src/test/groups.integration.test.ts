@@ -1501,18 +1501,20 @@ suite('Extension groups against a fake CLI', () => {
 			});
 
 			test('asking again shows the same one instead of opening another', async () => {
+				const before = api.graph.opened();
 				await exec(GRAPH_COMMAND);
 				await exec(GRAPH_COMMAND);
-				assert.strictEqual(api.graph.opened(), 1);
+				assert.strictEqual(api.graph.opened() - before, 1);
 			});
 
 			test('it can be opened again after it was closed', async () => {
+				const before = api.graph.opened();
 				await exec(GRAPH_COMMAND);
 				api.graph.close();
 				assert.strictEqual(api.graph.isOpen(), false);
 				await exec(GRAPH_COMMAND);
 				assert.strictEqual(api.graph.isOpen(), true);
-				assert.strictEqual(api.graph.opened(), 2);
+				assert.strictEqual(api.graph.opened() - before, 2);
 			});
 
 			test('it follows changes to the groups while it is open', async () => {

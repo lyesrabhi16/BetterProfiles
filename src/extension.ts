@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { BetterProfilesApi } from './api';
 import { registerGroupCommands } from './groupCommands';
+import { registerGraph } from './graphView';
 import { registerViews } from './views';
 import { createUi } from './ui';
 import {
@@ -70,11 +71,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		groupedExtensions: () => groups.groupedExtensions(),
 		ui,
 		get views() { return views.handles; },
+		get graph() { return graph.handle; },
 		statusBarItem,
 	};
 
 	const groups = registerGroupCommands({ context, log, api, ui });
-	const views = registerViews({ core: { ...groups.core, currentProfileName: async () => (await api.getCurrentProfile())?.name }, ui, log });
+	const viewsCore = { ...groups.core, currentProfileName: async () => (await api.getCurrentProfile())?.name };
+	const views = registerViews({ core: viewsCore, ui, log });
+	const graph = registerGraph({ core: viewsCore, ui, log });
 
 	context.subscriptions.push(
 		log,
@@ -96,6 +100,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),
 		...groups.disposables,
 		...views.disposables,
+		...graph.disposables,
 		// editing the groups file by hand: check again when it is saved
 		vscode.workspace.onDidSaveTextDocument(doc => {
 			if (doc.uri.fsPath === groups.groupsFilePath()) {

@@ -32,6 +32,12 @@
         "category": "Better Profiles"
       },
       {
+        "command": "better-profiles.showGraph",
+        "title": "Show Graph",
+        "category": "Better Profiles",
+        "icon": "$(graph)"
+      },
+      {
         "command": "better-profiles.addToGroup",
         "title": "Add Extensions To Group",
         "category": "Better Profiles"
@@ -280,6 +286,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "better-profiles.showGraph",
+          "when": "view == betterProfiles.groups || view == betterProfiles.profiles",
+          "group": "navigation@0"
+        },
         {
           "command": "better-profiles.view.newGroup",
           "when": "view == betterProfiles.groups",

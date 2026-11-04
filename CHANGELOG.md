@@ -29,6 +29,8 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- A graph view of extensions, groups and profiles, opened from a button at the top of the Better Profiles tab or with
+  `Better Profiles: Show Graph`. Pointing at a node lights up what it connects to; clicking an extension opens its page.
 - A group shown inside a profile has **Remove From Profile** (a right-click entry and a quick **×** button) instead of Delete Group:
   the profile stops following the group, which and whose extensions stay. Extensions inside such a group have the quick **×** too.
 - Double-clicking an extension in the Better Profiles tab opens its page. Right-clicking an extension offers Open Extension Page,

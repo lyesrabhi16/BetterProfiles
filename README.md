@@ -113,6 +113,13 @@ each extension's own folder in VS Code's extensions folder, which holds every pr
 the network. An extension without an image gets the generic extension icon, and one that cannot be found is shown by its id
 (a group marks it "not installed").
 
+**The graph** (the graph button at the top of either tree, or `Better Profiles: Show Graph`) opens a tab that draws the groups file
+as three columns: the extensions that are in a group, the groups, and the profiles, with a line from each extension to its groups and
+from each group to the profiles that follow it (dashed when it goes to all profiles). Point at anything, or move to it with the
+keyboard, to light up what it connects to; click an extension to open its page. It names extensions and shows their icons like the
+trees do, marks the profile of the window, redraws when the groups change, and has a Refresh button. It shows what the groups file
+says, not what is installed in each profile (the Profiles tree has that).
+
 **Double-click an extension** (in either tree) to open its page, the one the Extensions view shows. The tree only tells an
 extension about clicks, so two clicks within half a second on the same item count as a double click; if VS Code is set to open
 items on a double click (`workbench.list.openMode`), its own double click is used.

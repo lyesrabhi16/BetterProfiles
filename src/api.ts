@@ -40,6 +40,21 @@ export interface TreeViewHandles {
 	refresh(): void;
 }
 
+/** The graph view, for the tests and for other extensions to open it. */
+export interface GraphHandle {
+	open(): Promise<void>;
+	close(): void;
+	isOpen(): boolean;
+	/** How many times a panel was created. */
+	opened(): number;
+	/** How many times the page was sent its data. */
+	sent(): number;
+	/** What the page was last sent. */
+	state(): { graph: import('./graph').GraphModel; error?: string } | undefined;
+	/** What the page tells the extension; anything unexpected is ignored. */
+	receive(message: unknown): Promise<void>;
+}
+
 /** What `activate()` returns, so other extensions (and the tests) can use it. */
 export interface BetterProfilesApi {
 	/** The profile of this window, or undefined when VS Code gives no way to tell. */
@@ -58,6 +73,8 @@ export interface BetterProfilesApi {
 	groupedExtensions(): readonly string[];
 	/** The two trees of the Better Profiles tab. */
 	readonly views: { groups: TreeViewHandles; profiles: TreeViewHandles };
+	/** The graph of extensions, groups and profiles. */
+	readonly graph: GraphHandle;
 	readonly ui: PromptUi;
 	readonly statusBarItem: vscode.StatusBarItem;
 }
