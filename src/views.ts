@@ -370,6 +370,33 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 	};
 
 	const EXTENSION_KINDS = ['groupExtension', 'profileGroupExtension', 'profileExtension'];
+
+	const keyOf = (node: Node): string => JSON.stringify([node.kind, 'profile' in node ? node.profile : '', 'group' in node ? node.group : '', 'name' in node ? node.name : '', 'id' in node ? node.id.toLowerCase() : '']);
+
+	/**
+	 * The items a command acts on. VS Code runs a command of a tree item with the item that was clicked and, when that one is
+	 * part of a selection of several, the whole selection as a second argument. Only items of the kinds the command is
+	 * for count, each once, the clicked one first; with no selection (or one that does not hold the clicked item) it is
+	 * the clicked item alone. The clicked item itself must be of one of the kinds.
+	 */
+	function targetsOf<K extends Node['kind']>(clicked: unknown, selection: unknown, kinds: readonly K[]): Extract<Node, { kind: K }>[] {
+		const ofKind = (candidate: unknown): candidate is Extract<Node, { kind: K }> => typeof candidate === 'object' && candidate !== null && (kinds as readonly string[]).includes((candidate as Node).kind);
+		if (!ofKind(clicked)) {
+			throw new Error('This command works on an item of the Better Profiles tab.');
+		}
+		const chosen = Array.isArray(selection) && selection.some(item => typeof item === 'object' && item !== null && keyOf(item as Node) === keyOf(clicked)) ? selection.filter(ofKind) : [];
+		return [...new Map([clicked, ...chosen].map(node => [keyOf(node), node])).values()];
+	}
+	/** The ids of the extensions the command acts on (the clicked one and the selection), each once. */
+	const clickedExtensionIds = (clicked: unknown, selection: unknown): string[] =>
+		[...new Map(targetsOf(clicked, selection, ['groupExtension', 'profileGroupExtension', 'profileExtension']).map(node => [node.id.toLowerCase(), node.id])).values()];
+
+	/** What several removals did, as one report (the one removal's own report when there is only one). */
+	const mergeReports = (reports: unknown[]) => {
+		const all = reports as { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean }[];
+		return all.length === 1 ? all[0] : { uninstalled: all.flatMap(r => r.uninstalled), kept: all.flatMap(r => r.kept), failed: all.flatMap(r => r.failed), cancelled: all.some(r => r.cancelled) };
+	};
+
 	const extensionNodeOf = (arg: unknown): ExtensionNode => {
 		if (!EXTENSION_KINDS.includes((arg as Node | undefined)?.kind ?? '')) {
 			throw new Error('This command works on an item of the Better Profiles tab.');
@@ -442,63 +469,83 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 
 			command('better-profiles.view.openExtension', (arg?: unknown) => ui.openExtension(extensionNodeOf(arg).id)),
 
-			command('better-profiles.view.copyExtensionId', async (arg?: unknown) => {
-				const { id } = extensionNodeOf(arg);
-				await vscode.env.clipboard.writeText(id);
-				vscode.window.setStatusBarMessage(`Copied ${id}`, 2500);
+			command('better-profiles.view.copyExtensionId', async (clicked?: unknown, selection?: unknown) => {
+				const ids = clickedExtensionIds(clicked, selection);
+				await vscode.env.clipboard.writeText(ids.join('\n'));
+				vscode.window.setStatusBarMessage(ids.length === 1 ? `Copied ${ids[0]}` : `Copied ${ids.length} extension ids`, 2500);
 			}),
 
-			// Only the id is passed on: these commands read other fields (a "group", say) of what they are given as answers.
-			command('better-profiles.view.addExtensionToGroup', (arg?: unknown) =>
-				vscode.commands.executeCommand('better-profiles.extensionAddToGroup', extensionNodeOf(arg).id)),
+			// Only the ids are passed on: these commands read other fields (a "group", say) of what they are given as answers.
+			command('better-profiles.view.addExtensionToGroup', (clicked?: unknown, selection?: unknown) => {
+				const ids = clickedExtensionIds(clicked, selection);
+				return vscode.commands.executeCommand('better-profiles.extensionAddToGroup', ids.length === 1 ? ids[0] : { ids });
+			}),
 
-			command('better-profiles.view.installExtensionInProfiles', (arg?: unknown) =>
-				vscode.commands.executeCommand('better-profiles.extensionInstallInProfiles', extensionNodeOf(arg).id)),
+			command('better-profiles.view.installExtensionInProfiles', (clicked?: unknown, selection?: unknown) => {
+				const ids = clickedExtensionIds(clicked, selection);
+				return vscode.commands.executeCommand('better-profiles.extensionInstallInProfiles', ids.length === 1 ? ids[0] : { ids });
+			}),
 
-			command('better-profiles.view.deleteGroup', async (arg?: unknown) => {
-				const { name } = nodeOf(arg, 'group'); // the group itself: only from the Groups tree
+			command('better-profiles.view.deleteGroup', async (clicked?: unknown, selection?: unknown) => {
+				const names = targetsOf(clicked, selection, ['group']).map(node => node.name); // the groups themselves: only from the Groups tree
 				const { config, file } = await core.loadGroups();
-				const followers = profilesFollowing(config, name).map(profile => (profile === ALL_PROFILES ? 'all profiles' : profile));
+				const followers = (name: string) => profilesFollowing(config, name).map(profile => (profile === ALL_PROFILES ? 'all profiles' : profile));
 				const confirmed = await ui.confirm(
-					`Delete the group "${name}"?`,
-					`It has ${plural((config.groups[name] ?? []).length, 'extension')} and is followed by ${followers.length > 0 ? followers.join(', ') : 'no profile'}. The extensions themselves stay installed.`,
+					names.length === 1 ? `Delete the group "${names[0]}"?` : `Delete ${names.length} groups?`,
+					names.length === 1
+						? `It has ${plural((config.groups[names[0]] ?? []).length, 'extension')} and is followed by ${followers(names[0]).length > 0 ? followers(names[0]).join(', ') : 'no profile'}. The extensions themselves stay installed.`
+						: `${names.map(name => `${name}: ${plural((config.groups[name] ?? []).length, 'extension')}, followed by ${followers(name).length > 0 ? followers(name).join(', ') : 'no profile'}`).join('\n')}\n\nThe extensions themselves stay installed.`,
 					'Delete',
 				);
 				if (confirmed) {
-					await core.saveGroups(file, removeGroup(config, name));
+					await core.saveGroups(file, names.reduce((updated, name) => removeGroup(updated, name), config));
 				}
 			}),
 
-			command('better-profiles.view.removeFromGroup', async (arg?: unknown) => {
-				const { group, id } = nodeOf(arg, 'groupExtension'); // the real group: only from the Groups tree
+			command('better-profiles.view.removeFromGroup', async (clicked?: unknown, selection?: unknown) => {
+				const nodes = targetsOf(clicked, selection, ['groupExtension']); // the real group: only from the Groups tree
 				const { config, file } = await core.loadGroups();
-				await core.saveGroups(file, removeFromGroup(config, group, id));
-				void vscode.window.showInformationMessage(`Removed ${id} from "${group}". Nothing was uninstalled.`);
+				await core.saveGroups(file, nodes.reduce((updated, { group, id }) => removeFromGroup(updated, group, id), config));
+				void vscode.window.showInformationMessage(nodes.length === 1
+					? `Removed ${nodes[0].id} from "${nodes[0].group}". Nothing was uninstalled.`
+					: `Removed ${nodes.length} extensions from their groups. Nothing was uninstalled.`);
 			}),
 
-			command('better-profiles.view.removeFromProfile', async (arg?: unknown) => {
-				const { profile, name } = nodeOf(arg, 'profileGroup');
+			command('better-profiles.view.removeFromProfile', async (clicked?: unknown, selection?: unknown) => {
+				const nodes = targetsOf(clicked, selection, ['profileGroup']);
 				const { config, file } = await core.loadGroups();
-				const own = Object.prototype.hasOwnProperty.call(config.profiles, profile) ? config.profiles[profile] : [];
-				if (!own.includes(name)) {
-					// it comes from "*": the profile does not list it, so it cannot leave just this one
-					const choice = await ui.ask(`"${name}" goes to all profiles, so it cannot be taken out of just "${profile}".`, 'Remove From All Profiles');
+				const own = (profile: string) => (Object.prototype.hasOwnProperty.call(config.profiles, profile) ? config.profiles[profile] : []);
+				// a group that comes from "*" is not in the profile's own list: it cannot leave just this one
+				const fromAll = nodes.filter(node => !own(node.profile).includes(node.name));
+				const mine = nodes.filter(node => own(node.profile).includes(node.name));
+				if (fromAll.length > 0) {
+					const names = [...new Set(fromAll.map(node => node.name))];
+					const choice = await ui.ask(
+						names.length === 1
+							? `"${names[0]}" goes to all profiles, so it cannot be taken out of just "${fromAll[0].profile}".`
+							: `${names.length} groups go to all profiles, so they cannot be taken out of just one: ${names.map(name => `"${name}"`).join(', ')}.`,
+						'Remove From All Profiles',
+					);
 					if (choice !== undefined) {
-						await core.saveGroups(file, unassignGroup(config, ALL_PROFILES, name));
+						await core.saveGroups(file, names.reduce((updated, name) => unassignGroup(updated, ALL_PROFILES, name), (await core.loadGroups()).config));
 					}
-					return;
 				}
-				// stops the profile following the group and uninstalls the group's extensions from it, after asking
-				return vscode.commands.executeCommand('better-profiles.removeGroupFromProfile', { profile, group: name });
+				// stops each profile following its groups and uninstalls their extensions from it, after asking
+				const reports: unknown[] = [];
+				for (const profile of [...new Set(mine.map(node => node.profile))]) {
+					reports.push(await vscode.commands.executeCommand('better-profiles.removeGroupFromProfile', { profile, groups: mine.filter(node => node.profile === profile).map(node => node.name) }));
+				}
+				return mergeReports(reports);
 			}),
 
-			command('better-profiles.view.removeExtensionFromProfile', (arg?: unknown) => {
-				const node = extensionNodeOf(arg);
-				if (node.kind === 'groupExtension') {
-					throw new Error('This command works on an item of the Better Profiles tab.'); // that one belongs to the real group
+			command('better-profiles.view.removeExtensionFromProfile', async (clicked?: unknown, selection?: unknown) => {
+				// the extensions of the Groups tree belong to the real group: refused. Only ids and profiles are passed on.
+				const nodes = targetsOf(clicked, selection, ['profileGroupExtension', 'profileExtension']);
+				const reports: unknown[] = [];
+				for (const profile of [...new Set(nodes.map(node => node.profile))]) {
+					reports.push(await vscode.commands.executeCommand('better-profiles.removeExtensionFromProfile', { profile, ids: nodes.filter(node => node.profile === profile).map(node => node.id) }));
 				}
-				// only the id and the profile are passed on: what the node says about its group must not answer for the user
-				return vscode.commands.executeCommand('better-profiles.removeExtensionFromProfile', { profile: node.profile, id: node.id });
+				return mergeReports(reports);
 			}),
 
 			command('better-profiles.view.syncProfile', (arg?: unknown) =>
@@ -507,8 +554,8 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 			command('better-profiles.view.setTriggers', (arg?: unknown) =>
 				vscode.commands.executeCommand('better-profiles.setGroupTriggers', { group: groupNameOf(arg) })),
 
-			command('better-profiles.view.assignGroup', (arg?: unknown) =>
-				vscode.commands.executeCommand('better-profiles.assignGroup', { group: groupNameOf(arg) })),
+			command('better-profiles.view.assignGroup', (clicked?: unknown, selection?: unknown) =>
+				vscode.commands.executeCommand('better-profiles.assignGroup', { groups: [...new Set(targetsOf(clicked, selection, ['group', 'profileGroup']).map(node => node.name))] })),
 		],
 		handles: {
 			groups: { provider: groups as vscode.TreeDataProvider<unknown>, dnd: groupsDnd as vscode.TreeDragAndDropController<unknown>, refresh: () => groups.refresh() },

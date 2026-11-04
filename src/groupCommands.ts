@@ -347,19 +347,22 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return next;
 	};
 
-	const assignGroupCommand = async (args?: { profile?: string; group?: string }): Promise<GroupsConfig | undefined> => {
+	const assignGroupCommand = async (args?: { profile?: string; group?: string; groups?: string[] }): Promise<GroupsConfig | undefined> => {
 		const { config, file } = await loadGroups();
+		const named = args?.groups ?? (args?.group === undefined ? undefined : [args.group]);
 		const profile = args?.profile ?? await pickProfile('Give a group to which profile?', { includeAll: true });
-		const group = profile === undefined ? undefined : (args?.group ?? await pickGroup(config, `Which group should "${profile}" have?`));
-		if (profile === undefined || group === undefined) {
+		const picked = profile === undefined ? undefined : (named ?? await (async () => { const one = await pickGroup(config, `Which group should "${profile}" have?`); return one === undefined ? undefined : [one]; })());
+		if (profile === undefined || picked === undefined || picked.length === 0) {
 			return undefined;
 		}
-		if (!Object.prototype.hasOwnProperty.call(config.groups, group)) {
-			throw new Error(`There is no group "${group}". Add extensions to it first.`);
+		for (const group of picked) {
+			if (!Object.prototype.hasOwnProperty.call(config.groups, group)) {
+				throw new Error(`There is no group "${group}". Add extensions to it first.`);
+			}
 		}
-		const next = assignGroup(config, profile, group);
+		const next = picked.reduce((updated, group) => assignGroup(updated, profile, group), config);
 		await saveGroups(file, next);
-		offer(`"${profile === ALL_PROFILES ? 'All profiles' : profile}" now gets the group "${group}".`, { [SYNC_BUTTON]: () => vscode.commands.executeCommand('better-profiles.syncProfile') });
+		offer(`"${profile === ALL_PROFILES ? 'All profiles' : profile}" now gets the group${picked.length === 1 ? '' : 's'} ${picked.map(group => `"${group}"`).join(', ')}.`, { [SYNC_BUTTON]: () => vscode.commands.executeCommand('better-profiles.syncProfile') });
 		return next;
 	};
 
@@ -374,24 +377,37 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		return id;
 	};
+	/** One extension (an id, or an object with an id), or `{ ids }` for several: each valid, once. */
+	const extensionIdsOf = (target: unknown): string[] => {
+		const given = Array.isArray((target as { ids?: unknown } | null | undefined)?.ids) ? (target as { ids: unknown[] }).ids : [target];
+		const ids = [...new Map(given.map(item => extensionIdOf(item)).map(id => [lower(id), id])).values()];
+		if (ids.length === 0) {
+			throw new Error('No extension was given.');
+		}
+		return ids;
+	};
 	const optionsOf = <T extends object>(target: unknown): Partial<T> => (typeof target === 'object' && target !== null ? target as Partial<T> : {});
 
 	const quoted = (names: string[]) => names.map(name => `"${name}"`).join(', ');
 
 	const extensionAddToGroup = async (target: unknown): Promise<GroupsConfig | undefined> => {
-		const id = extensionIdOf(target);
+		const ids = extensionIdsOf(target);
+		const subject = ids.length === 1 ? ids[0] : `${ids.length} extensions`;
 		const { config, file } = await loadGroups();
 		const named = optionsOf<{ group: string; groups: string[] }>(target);
+		const heldIn = (group: string) => ids.filter(id => (config.groups[group] ?? []).some(existing => lower(existing) === lower(id)));
 		let picked: string[] | undefined = named.groups ?? (named.group === undefined ? undefined : [named.group]);
 		if (picked === undefined) {
-			const holders = groupsContaining(config, id);
 			picked = await ui.pickMany(
-				`Add ${id} to which groups?`,
-				Object.keys(config.groups).map(name => ({
-					id: name,
-					label: name,
-					description: holders.includes(name) ? '$(check) already has it' : `${config.groups[name].length} extensions`,
-				})),
+				`Add ${subject} to which groups?`,
+				Object.keys(config.groups).map(name => {
+					const held = heldIn(name).length;
+					return {
+						id: name,
+						label: name,
+						description: held === ids.length ? `$(check) already has ${ids.length === 1 ? 'it' : 'all of them'}` : held > 0 ? `${held} of ${ids.length} already in it` : `${config.groups[name].length} extensions`,
+					};
+				}),
 				{ newItem: { label: '$(add) New group', prompt: 'Name of the new group' } },
 			);
 		}
@@ -400,16 +416,24 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		if (chosen.length === 0) {
 			return undefined;
 		}
-		const holders = groupsContaining(config, id);
-		const toAdd = chosen.filter(name => !holders.includes(name));
-		const already = chosen.filter(name => holders.includes(name));
-		if (toAdd.length === 0) {
-			void vscode.window.showInformationMessage(`${id} is already in ${quoted(already)}.`);
+		let next = config;
+		const touched: string[] = [];
+		const already: string[] = [];
+		for (const name of chosen) {
+			const missing = ids.filter(id => !heldIn(name).some(held => lower(held) === lower(id)));
+			if (missing.length === 0) {
+				already.push(name);
+			} else {
+				next = addToGroup(next, name, missing);
+				touched.push(name);
+			}
+		}
+		if (touched.length === 0) {
+			void vscode.window.showInformationMessage(`${subject} ${ids.length === 1 ? 'is' : 'are'} already in ${quoted(already)}.`);
 			return config;
 		}
-		const next = toAdd.reduce((updated, name) => addToGroup(updated, name, [id]), config);
 		await saveGroups(file, next);
-		offer(`Added ${id} to ${quoted(toAdd)}.${already.length > 0 ? ` It was already in ${quoted(already)}.` : ''}`, nextStepFor(next, toAdd));
+		offer(`Added ${subject} to ${quoted(touched)}.${already.length > 0 ? ` ${ids.length === 1 ? 'It was' : 'They were'} already in ${quoted(already)}.` : ''}`, nextStepFor(next, touched));
 		return next;
 	};
 
@@ -442,8 +466,9 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return next;
 	};
 
-	const extensionInstallInProfiles = async (target: unknown): Promise<{ id: string; results: { profile: string; ok: boolean; message: string }[]; alreadyHad: string[] } | undefined> => {
-		const id = extensionIdOf(target);
+	const extensionInstallInProfiles = async (target: unknown): Promise<{ id: string; ids: string[]; results: { profile: string; ok: boolean; message: string }[]; alreadyHad: string[] } | undefined> => {
+		const ids = extensionIdsOf(target);
+		const subject = ids.length === 1 ? ids[0] : `${ids.length} extensions`;
 		const named = optionsOf<{ profiles: string[] }>(target).profiles;
 		const names = await profileNames();
 		const unknown = named?.find(profile => !names.includes(profile));
@@ -452,47 +477,57 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		const cli = resolveCliOrThrow();
 
-		const found = await looking(`Looking for ${id} in every profile…`, () => Promise.all(names.map(async name => [name, (await store.list(name, { maxAgeMs: 0 })).some(e => lower(e.id) === lower(id))] as const)));
-		const has = new Map(found);
-		const alreadyHad = names.filter(name => has.get(name));
-		const lacking = names.filter(name => !has.get(name));
+		const found = await looking(`Looking for ${subject} in every profile…`, () => Promise.all(names.map(async name => {
+			const have = new Set((await store.list(name, { maxAgeMs: 0 })).map(e => lower(e.id)));
+			return [name, ids.filter(id => !have.has(lower(id)))] as const;
+		})));
+		const missing = new Map(found);
+		const alreadyHad = names.filter(name => missing.get(name)!.length === 0);
+		const lacking = names.filter(name => missing.get(name)!.length > 0);
 		if (lacking.length === 0) {
-			void vscode.window.showInformationMessage(`${id} is already in every profile.`);
-			return { id, results: [], alreadyHad };
+			void vscode.window.showInformationMessage(ids.length === 1 ? `${ids[0]} is already in every profile.` : `All ${ids.length} extensions are already in every profile.`);
+			return { id: ids[0], ids, results: [], alreadyHad };
 		}
 
 		let targets: string[];
 		if (named) {
 			targets = named.filter(profile => lacking.includes(profile));
 		} else {
-			const picked = await ui.pickMany(`Install ${id} into which profiles?`, lacking.map(name => ({ id: name, label: name })));
+			const picked = await ui.pickMany(
+				`Install ${subject} into which profiles?`,
+				lacking.map(name => ({ id: name, label: name, description: ids.length > 1 ? `lacks ${missing.get(name)!.length} of ${ids.length}` : undefined })),
+			);
 			if (!picked?.length) {
 				return undefined;
 			}
 			targets = lacking.filter(name => picked.includes(name));
 		}
 
-		targets.forEach(profile => store.installing(profile, [id])); // shown in those profiles now, while the command line works
-		const results = await withProgress(`Installing ${id}…`, async () => {
+		targets.forEach(profile => store.installing(profile, missing.get(profile)!)); // shown in those profiles now, while the command line works
+		const results = await withProgress(`Installing ${subject}…`, async () => {
 			const done: { profile: string; ok: boolean; message: string }[] = [];
 			for (const profile of targets) {
-				const result = await installExtension(cli, run, id, profile);
-				if (!result.ok) {
-					log.error(`${id} -> ${profile}: ${result.message}`);
+				const failures: string[] = [];
+				for (const id of missing.get(profile)!) {
+					const result = await installExtension(cli, run, id, profile);
+					if (!result.ok) {
+						log.error(`${id} -> ${profile}: ${result.message}`);
+						failures.push(ids.length === 1 ? result.message : `${id}: ${result.message}`);
+					}
+					result.ok ? store.added(profile, [id]) : store.settle(profile, [id]);
+					if (result.ok) {
+						await forgetExclusions(profile, [id]);
+					}
 				}
-				result.ok ? store.added(profile, [id]) : store.settle(profile, [id]);
-				done.push({ profile, ok: result.ok, message: result.message });
+				done.push({ profile, ok: failures.length === 0, message: failures.join('; ') });
 			}
 			return done;
 		});
-		for (const done of results.filter(r => r.ok)) {
-			await forgetExclusions(done.profile, [id]);
-		}
 		const failed = results.filter(r => !r.ok);
 		void (failed.length === 0
-			? vscode.window.showInformationMessage(results.length > 0 ? `Installed ${id} into ${results.map(r => `"${r.profile}"`).join(', ')}.` : `${id} is already in the profiles you named.`)
-			: vscode.window.showWarningMessage(`Could not install ${id} into ${failed.map(r => `"${r.profile}"`).join(', ')}.`, 'Show Log').then(choice => choice && log.show()));
-		return { id, results, alreadyHad };
+			? vscode.window.showInformationMessage(results.length > 0 ? `Installed ${subject} into ${results.map(r => `"${r.profile}"`).join(', ')}.` : `${subject} ${ids.length === 1 ? 'is' : 'are'} already in the profiles you named.`)
+			: vscode.window.showWarningMessage(`Could not install ${subject} into ${failed.map(r => `"${r.profile}"`).join(', ')}.`, 'Show Log').then(choice => choice && log.show()));
+		return { id: ids[0], ids, results, alreadyHad };
 	};
 
 	const setGroupTriggersCommand = async (args?: { group?: string; patterns?: string[] }): Promise<GroupsConfig | undefined> => {
@@ -618,23 +653,25 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	};
 
 	/**
-	 * Makes a profile stop following a group and uninstalls the group's extensions from it, except those that another
-	 * group the profile follows still wants. The group itself and every other profile are untouched.
+	 * Makes a profile stop following one or more groups and uninstalls their extensions from it, except those that
+	 * another group the profile still follows wants. The groups themselves and every other profile are untouched.
 	 */
-	const removeGroupFromProfile = async (args?: { profile?: string; group?: string; confirm?: boolean }): Promise<RemovalReport> => {
+	const removeGroupFromProfile = async (args?: { profile?: string; group?: string; groups?: string[]; confirm?: boolean }): Promise<RemovalReport> => {
 		const profile = await checkedProfile(args?.profile);
-		const group = String(args?.group);
+		const removed = args?.groups ?? [String(args?.group)];
 		const { config, file } = await loadGroups();
-		const next = unassignGroup(config, profile, group);
+		const next = removed.reduce((updated, group) => unassignGroup(updated, profile, group), config);
 		const stillWanted = new Set(desiredExtensions(next, profile).ids.map(lower));
 		const excluded = new Set((config.excludes?.[profile] ?? []).map(lower));
 		const cli = resolveCliOrThrow();
-		const plan = await planRemoval(profile, (config.groups[group] ?? []).filter(id => !stillWanted.has(lower(id)) && !excluded.has(lower(id))));
+		const members = [...new Set(removed.flatMap(group => config.groups[group] ?? []))];
+		const plan = await planRemoval(profile, members.filter(id => !stillWanted.has(lower(id)) && !excluded.has(lower(id))));
 		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
+		const names = removed.map(group => `"${group}"`).join(', ');
 
 		if (plan.remove.length > 0 && args?.confirm !== false && !await ui.confirm(
-			`Remove "${group}" from "${profile}" and uninstall ${plan.remove.length} extension${plan.remove.length === 1 ? '' : 's'} from it?`,
-			`${plan.remove.join('\n')}\n\nThey are uninstalled from "${profile}" only. The group and the other profiles are not changed.${plan.kept.length > 0 ? `\n\nStays installed: ${plan.kept.join(', ')}.` : ''}`,
+			`Remove ${removed.length === 1 ? names : `${removed.length} groups`} from "${profile}" and uninstall ${plan.remove.length} extension${plan.remove.length === 1 ? '' : 's'} from it?`,
+			`${removed.length > 1 ? `Groups: ${names}\n\n` : ''}${plan.remove.join('\n')}\n\nThey are uninstalled from "${profile}" only. The group${removed.length === 1 ? '' : 's'} and the other profiles are not changed.${plan.kept.length > 0 ? `\n\nStays installed: ${plan.kept.join(', ')}.` : ''}`,
 			'Remove and Uninstall',
 		)) {
 			report.cancelled = true;
@@ -650,55 +687,64 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		for (const result of await uninstallFrom(cli, profile, plan.remove)) {
 			(result.ok ? report.uninstalled : report.failed).push(result.id);
 		}
-		const alsoAll = (config.profiles[ALL_PROFILES] ?? []).includes(group);
-		void vscode.window.showInformationMessage(`"${profile}" no longer follows "${group}"${alsoAll ? ', which still goes to all profiles' : ''}.`);
+		const alsoAll = removed.filter(group => (config.profiles[ALL_PROFILES] ?? []).includes(group));
+		void vscode.window.showInformationMessage(`"${profile}" no longer follows ${names}${alsoAll.length > 0 ? `, which still goes to all profiles` : ''}.`);
 		reported(profile, report);
 		return report;
 	};
 
 	/**
-	 * Uninstalls one extension from one profile. When a group the profile follows has it, the profile is also told not to
-	 * want it (otherwise the next sync would bring it back); the group itself and the other profiles are untouched.
+	 * Uninstalls one or more extensions from one profile. Those a group the profile follows has are also recorded as not
+	 * wanted by the profile (otherwise the next sync would bring them back); the groups and the other profiles are untouched.
 	 */
-	const removeExtensionFromProfile = async (args?: { profile?: string; id?: string; confirm?: boolean }): Promise<RemovalReport> => {
-		const id = extensionIdOf(args?.id);
+	const removeExtensionFromProfile = async (args?: { profile?: string; id?: string; ids?: string[]; confirm?: boolean }): Promise<RemovalReport> => {
+		const ids = args?.ids === undefined ? [extensionIdOf(args?.id)] : extensionIdsOf({ ids: args.ids });
 		const profile = await checkedProfile(args?.profile);
-		const { config, file } = await loadGroups();
-		const wanted = desiredExtensions(config, profile).ids.some(existing => lower(existing) === lower(id));
+		const { config } = await loadGroups();
+		const desired = new Set(desiredExtensions(config, profile).ids.map(lower));
 		const cli = resolveCliOrThrow();
-		const plan = await planRemoval(profile, [id]);
+		const plan = await planRemoval(profile, ids);
 		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
-		const exclude = async () => saveGroups(file, excludeFromProfile((await loadGroups()).config, profile, id));
+		const present = new Set([...plan.remove, ...plan.kept].map(lower));
+		const exclude = async (which: string[]) => {
+			const loaded = await loadGroups();
+			await saveGroups(loaded.file, which.reduce((updated, id) => excludeFromProfile(updated, profile, id), loaded.config));
+		};
 
-		if (plan.kept.length > 0) {
-			reported(profile, report);
-			return report;
+		// not installed here, but a group wants it: only record that this profile does not want it
+		const absentButWanted = ids.filter(id => !present.has(lower(id)) && desired.has(lower(id)));
+		if (absentButWanted.length > 0) {
+			await exclude(absentButWanted);
 		}
 		if (plan.remove.length === 0) {
-			if (wanted) {
-				await exclude(); // not installed here: only record that the profile does not want it
+			if (plan.kept.length > 0) {
+				reported(profile, report);
 			}
 			return report;
 		}
+		const wanted = plan.remove.filter(id => desired.has(lower(id)));
 		if (args?.confirm !== false && !await ui.confirm(
-			`Uninstall "${id}" from "${profile}"?`,
-			wanted
-				? `It stays in its group, and the other profiles keep it. "${profile}" will no longer ask for it.`
-				: `None of the groups of "${profile}" has it. It is uninstalled from this profile only.`,
+			plan.remove.length === 1 ? `Uninstall "${plan.remove[0]}" from "${profile}"?` : `Uninstall ${plan.remove.length} extensions from "${profile}"?`,
+			`${plan.remove.length > 1 ? `${plan.remove.join('\n')}\n\n` : ''}${wanted.length > 0
+				? (wanted.length === 1
+					? `It stays in its group, and the other profiles keep it. "${profile}" will no longer ask for it.`
+					: `Those that a group has stay in their groups, and the other profiles keep them. "${profile}" will no longer ask for them.`)
+				: `None of the groups of "${profile}" has ${plan.remove.length === 1 ? 'it' : 'them'}. ${plan.remove.length === 1 ? 'It is' : 'They are'} uninstalled from this profile only.`}${plan.kept.length > 0 ? `\n\nStays installed: ${plan.kept.join(', ')}.` : ''}`,
 			'Uninstall',
 		)) {
 			report.cancelled = true;
 			return report;
 		}
 		store.removing(profile, plan.remove); // gone from the tree now
-		if (wanted) {
-			await exclude(); // the group then shows it as removed from this profile at once
+		if (wanted.length > 0) {
+			await exclude(wanted); // the groups then show them as removed from this profile at once
 		}
 		for (const result of await uninstallFrom(cli, profile, plan.remove)) {
 			(result.ok ? report.uninstalled : report.failed).push(result.id);
 		}
-		if (wanted && report.failed.length > 0) {
-			await forgetExclusions(profile, [id]); // it is still installed, so the profile still has it
+		const stillThere = wanted.filter(id => report.failed.some(failed => lower(failed) === lower(id)));
+		if (stillThere.length > 0) {
+			await forgetExclusions(profile, stillThere); // those are still installed, so the profile still has them
 		}
 		reported(profile, report);
 		return report;

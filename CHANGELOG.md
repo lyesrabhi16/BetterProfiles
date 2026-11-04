@@ -49,6 +49,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Several selected items can be added or removed at once, from the right-click menu or the quick button: Add to Group, Install in
+  Other Profiles, Give To A Profile, Copy Extension Id, Remove From Group, Remove From Profile (extensions and groups) and Delete Group
+  act on the whole selection, with one question and one run of the command line instead of one per item.
 - A graph view of extensions, groups and profiles, opened from a button at the top of the Better Profiles tab or with
   `Better Profiles: Show Graph`. Pointing at a node lights up what it connects to; clicking an extension opens its page.
 - **Remove From Profile** now uninstalls. On an extension inside a profile it uninstalls it from that profile only and records an

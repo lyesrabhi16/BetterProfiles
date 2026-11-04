@@ -1732,11 +1732,12 @@ suite('Extension groups against a fake CLI', () => {
 					await run('installExtensionInProfiles', some()[0], [some()[0], some()[2]]);
 					assert.strictEqual(seen.pickMany.length, 1);
 					assert.deepStrictEqual(seen.pickMany[0].items.map(i => i.id), ['Default', 'Agents'], 'Python has both, so it is not offered');
-					assert.deepStrictEqual(installs().sort(), [
+					const as = (list: string[][]) => list.map(args => args.join(' ')).sort();
+					assert.deepStrictEqual(as(installs()), as([
 						['--install-extension', 'p.installed', '--profile', 'Agents'],
-						['--install-extension', 'p.installed', '--profile', 'Default'],
-						['--install-extension', 'shared.x', '--profile', 'Default'],
-					].sort());
+						['--install-extension', 'p.installed'], // the default profile is the one without --profile
+						['--install-extension', 'shared.x'],
+					]));
 				});
 
 				test('Install in Other Profiles with every extension already everywhere says so', async () => {

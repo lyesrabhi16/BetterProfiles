@@ -151,6 +151,13 @@ Right-click a group in the Groups tree for **Give To A Profile**, **Set Workspac
 group inside a profile has the first two and **Remove From Profile**. A profile has **Sync Profile With Its Groups**. The quick **×**
 button does the same as the right-click entry that removes (from the group in the Groups tree, from the profile in the Profiles tree).
 
+**Select several** (Ctrl or Shift click) and use the right-click menu or the quick **×** on one of them: the command acts on all the selected
+items of the kind it is for, with one question and one run of the command line. This works for Add to Group, Install in Other Profiles,
+Give To A Profile, Copy Extension Id, Remove From Group, Remove From Profile (extensions and groups) and Delete Group. Items of other
+kinds in the selection are left out, and if the clicked item is not part of the selection only the clicked item is used. Extensions
+selected in several profiles are each removed from their own profile, with one question per profile. Open Extension Page,
+Set Workspace Triggers and Sync Profile take one item.
+
 Drag and drop works between the two trees and inside them:
 
 | Drag | Onto | Result |
