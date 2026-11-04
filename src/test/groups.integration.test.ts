@@ -1199,6 +1199,29 @@ suite('Extension groups against a fake CLI', () => {
 				assert.strictEqual(askedForPython(), 1);
 			});
 
+			test('it refreshes when the groups change, since they decide what a profile shows, without asking the command line again', async () => {
+				const askedForPython = () => calls().filter(a => a.includes('--list-extensions') && a.includes('Python')).length;
+				await children('profiles', profile('Python'));
+				let fired = 0;
+				const subscription = provider('profiles').onDidChangeTreeData?.(() => fired++);
+				await exec('better-profiles.addToGroup', { group: 'web', extensions: ['z.new'] });
+				assert.ok(await until(() => fired > 0), 'the Profiles tree should have been told to refresh');
+				subscription?.dispose();
+				await children('profiles', profile('Python'));
+				assert.strictEqual(askedForPython(), 1, 'what a profile has did not change');
+			});
+
+			test('a group given to a profile by a drop shows in that profile at once', async () => {
+				const before = (await children('profiles', profile('Agents'))).map(n => n.kind);
+				assert.ok(!before.includes('profileGroup'));
+				let fired = 0;
+				const subscription = provider('profiles').onDidChangeTreeData?.(() => fired++);
+				await drop('profiles', profile('Agents'), await drag('groups', [group('web')]));
+				assert.ok(await until(() => fired > 0));
+				subscription?.dispose();
+				assert.ok((await children('profiles', profile('Agents'))).some(n => n.kind === 'profileGroup' && n.name === 'web'));
+			});
+
 			test('the list is asked for once and cached until refresh', async () => {
 				const askedForPython = () => calls().filter(a => a.includes('--list-extensions') && a.includes('Python')).length;
 				await children('profiles', profile('Python'));
