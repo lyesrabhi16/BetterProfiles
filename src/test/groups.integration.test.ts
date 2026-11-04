@@ -585,12 +585,18 @@ suite('Extension groups against a fake CLI', () => {
 				}
 			});
 
-			test('their titles start with the [Better Profiles] tag, so they can be told apart in a menu full of other extensions\' entries', () => {
+			test('their titles start with the [Better Profiles] tag and have no trailing ellipsis, so they can be told apart in a menu full of other extensions\' entries', () => {
 				const commands: { command: string; title: string }[] = contributes().commands;
 				for (const id of ALL) {
 					const title = commands.find(c => c.command === id)!.title;
 					assert.ok(title.startsWith('[Better Profiles] '), title);
+					assert.ok(!/(…|\.\.\.)$/.test(title), 'no trailing ellipsis: ' + title);
 				}
+			});
+
+			test('no command title of the extension ends with an ellipsis', () => {
+				const titles: string[] = contributes().commands.map((c: { title: string }) => c.title);
+				assert.deepStrictEqual(titles.filter(title => /(…|\.\.\.)$/.test(title)), []);
 			});
 
 			test('they are declared and registered, and kept out of the Command Palette because they need an extension to act on', async () => {
@@ -785,8 +791,8 @@ suite('Extension groups against a fake CLI', () => {
 	suite('buttons on the notifications that follow a change to the groups', () => {
 		const ADD_FROM_MENU = 'better-profiles.extensionAddToGroup';
 		const ASSIGN = 'better-profiles.assignGroup';
-		const SYNC = 'Sync Profile…';
-		const GIVE = 'Give Group To A Profile…';
+		const SYNC = 'Sync Profile';
+		const GIVE = 'Give Group To A Profile';
 		const until = async (condition: () => boolean, ms = 3000) => {
 			const end = Date.now() + ms;
 			while (!condition() && Date.now() < end) {
@@ -825,13 +831,13 @@ suite('Extension groups against a fake CLI', () => {
 			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);
 		});
 
-		test('clicking "Sync Profile…" starts the sync flow, which asks which profile', async () => {
+		test('clicking "Sync Profile" starts the sync flow, which asks which profile', async () => {
 			answer({ ask: () => SYNC, pickOne: () => undefined });
 			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' });
 			assert.ok(await until(() => seen.pickOne.some(p => p.title === 'Sync which profile with its groups?')), 'the sync flow should have started');
 		});
 
-		test('clicking "Give Group To A Profile…" asks which profile, for that group, and gives it', async () => {
+		test('clicking "Give Group To A Profile" asks which profile, for that group, and gives it', async () => {
 			writeGroups({ groups: { web: ['a.b'], lonely: ['c.d'] } });
 			answer({ ask: () => GIVE, pickOne: title => (title === 'Give a group to which profile?' ? 'Python' : undefined) });
 			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'lonely' });
@@ -871,7 +877,7 @@ suite('Extension groups against a fake CLI', () => {
 			assert.ok(/all profiles/i.test(seen.ask[0].message), seen.ask[0].message);
 		});
 
-		test('the older "Add Extensions To Group…" command has the same follow-up', async () => {
+		test('the older "Add Extensions To Group" command has the same follow-up', async () => {
 			await exec('better-profiles.addToGroup', { group: 'web', extensions: ['x.new'] });
 			assert.ok(await until(() => seen.ask.length > 0));
 			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);

@@ -33,17 +33,17 @@
       },
       {
         "command": "better-profiles.addToGroup",
-        "title": "Add Extensions To Group…",
+        "title": "Add Extensions To Group",
         "category": "Better Profiles"
       },
       {
         "command": "better-profiles.assignGroup",
-        "title": "Give A Group To A Profile…",
+        "title": "Give A Group To A Profile",
         "category": "Better Profiles"
       },
       {
         "command": "better-profiles.syncProfile",
-        "title": "Sync Profile With Its Groups…",
+        "title": "Sync Profile With Its Groups",
         "category": "Better Profiles"
       },
       {
@@ -58,20 +58,20 @@
       },
       {
         "command": "better-profiles.setGroupTriggers",
-        "title": "Set Workspace Triggers For A Group…",
+        "title": "Set Workspace Triggers For A Group",
         "category": "Better Profiles"
       },
       {
         "command": "better-profiles.extensionAddToGroup",
-        "title": "[Better Profiles] Add to Group…"
+        "title": "[Better Profiles] Add to Group"
       },
       {
         "command": "better-profiles.extensionRemoveFromGroup",
-        "title": "[Better Profiles] Remove from Group…"
+        "title": "[Better Profiles] Remove from Group"
       },
       {
         "command": "better-profiles.extensionInstallInProfiles",
-        "title": "[Better Profiles] Install in Other Profiles…"
+        "title": "[Better Profiles] Install in Other Profiles"
       }
     ],
     "configuration": {
@@ -118,7 +118,7 @@
           ],
           "default": "ask",
           "scope": "application",
-          "markdownDescription": "Whether the current profile is brought up to date with its extension groups. Uninstalling is never automatic: it only happens through `Better Profiles: Sync Profile With Its Groups…`, which lists what would go and asks first."
+          "markdownDescription": "Whether the current profile is brought up to date with its extension groups. Uninstalling is never automatic: it only happens through `Better Profiles: Sync Profile With Its Groups`, which lists what would go and asks first."
         },
         "betterProfiles.keepExtensions": {
           "type": "array",

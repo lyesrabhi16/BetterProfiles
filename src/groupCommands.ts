@@ -173,11 +173,11 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			label: name,
 			description: holders.includes(name) ? '$(check) already has it' : `${config.groups[name].length} extensions`,
 		}));
-		return ui.pickOne(title, items, options.allowNew ? { newItem: { label: '$(add) New group…', prompt: 'Name of the new group' } } : undefined);
+		return ui.pickOne(title, items, options.allowNew ? { newItem: { label: '$(add) New group', prompt: 'Name of the new group' } } : undefined);
 	}
 
-	const SYNC_BUTTON = 'Sync Profile…';
-	const GIVE_BUTTON = 'Give Group To A Profile…';
+	const SYNC_BUTTON = 'Sync Profile';
+	const GIVE_BUTTON = 'Give Group To A Profile';
 
 	/** A notification whose buttons start the next step. The command never waits for the answer: the user may leave it open. */
 	function offer(message: string, actions: Record<string, () => Thenable<unknown>>): void {

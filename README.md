@@ -67,11 +67,11 @@ several places. Groups let you name a set once and give it to the profiles that 
 
 | Command | What it does |
 |---|---|
-| `Better Profiles: Add Extensions To Group…` | Pick a group (or make one) and tick extensions from a profile that already has them. |
-| `Better Profiles: Give A Group To A Profile…` | Make a profile (or all of them) follow a group. |
+| `Better Profiles: Add Extensions To Group` | Pick a group (or make one) and tick extensions from a profile that already has them. |
+| `Better Profiles: Give A Group To A Profile` | Make a profile (or all of them) follow a group. |
 | `Better Profiles: Compare Extensions Across Profiles` | Opens a table: one row per extension, one column per profile. |
-| `Better Profiles: Sync Profile With Its Groups…` | Installs what a profile is missing (after you confirm), then offers to uninstall what its groups do not mention (you tick what goes). |
-| `Better Profiles: Set Workspace Triggers For A Group…` | Tell a group which files mean "this workspace needs me" (see [Install when needed](#install-when-needed)). |
+| `Better Profiles: Sync Profile With Its Groups` | Installs what a profile is missing (after you confirm), then offers to uninstall what its groups do not mention (you tick what goes). |
+| `Better Profiles: Set Workspace Triggers For A Group` | Tell a group which files mean "this workspace needs me" (see [Install when needed](#install-when-needed)). |
 | `Better Profiles: Reset Sync Prompts` | Forget "Not now" answers so the prompt below can appear again. |
 | `Better Profiles: Edit Groups File` | Opens the JSON file below. |
 
@@ -104,12 +104,12 @@ they are not in the Command Palette because they need an extension to act on.
 
 | Entry | What it does |
 |---|---|
-| **[Better Profiles] Add to Group…** | Pick a group, or type a name to start one, and the extension is added to it. The notification that follows has a button for the next step: **Sync Profile…**, or **Give Group To A Profile…** if no profile follows the group yet. |
-| **[Better Profiles] Remove from Group…** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
-| **[Better Profiles] Install in Other Profiles…** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
+| **[Better Profiles] Add to Group** | Pick a group, or type a name to start one, and the extension is added to it. The notification that follows has a button for the next step: **Sync Profile**, or **Give Group To A Profile** if no profile follows the group yet. |
+| **[Better Profiles] Remove from Group** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
+| **[Better Profiles] Install in Other Profiles** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
 
 A menu entry's label is fixed text in VS Code, so group names cannot be written into the menu itself; the **Add** list marks the groups that already hold the extension.
-They show for installed extensions that are not built into VS Code. "[Better Profiles] Install in Other Profiles…" asks the command line
+They show for installed extensions that are not built into VS Code. "[Better Profiles] Install in Other Profiles" asks the command line
 about every profile first, so an extension that every profile already has (application scoped) gets a message and
 nothing else.
 
@@ -157,14 +157,14 @@ own. Those were warm-cache numbers on an SSD; a cold disk or a far larger reposi
 
 Triggers only decide what the *automatic* check offers:
 
-- `Sync Profile With Its Groups…` is an explicit request, so it installs every group of the profile, triggers or not.
+- `Sync Profile With Its Groups` is an explicit request, so it installs every group of the profile, triggers or not.
 - Cleanup considers all the profile's groups, matched or not. Another workspace may need a group this one does not,
   so its extensions are never offered for removal just because this workspace does not match. For the same reason
   nothing tells you an extension is "no longer needed".
 
 ### Uninstalling
 
-Removing extensions is never automatic. It only happens through `Sync Profile With Its Groups…` (also offered after
+Removing extensions is never automatic. It only happens through `Sync Profile With Its Groups` (also offered after
 you click **Sync** in the notification), in three steps: a checkbox list of the *extras* with **nothing ticked**,
 you tick what should go, then a confirmation that lists exactly those.
 
