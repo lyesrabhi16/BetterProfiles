@@ -998,6 +998,8 @@ suite('Extension groups against a fake CLI', () => {
 		const groupExt = (g: string, id: string): Node => ({ kind: 'groupExtension', group: g, id });
 		const profile = (name: string): Node => ({ kind: 'profile', name });
 		const profileExt = (p: string, id: string): Node => ({ kind: 'profileExtension', profile: p, id });
+		const profileGroup = (p: string, g: string): Node => ({ kind: 'profileGroup', profile: p, name: g });
+		const profileGroupExt = (p: string, g: string, id: string): Node => ({ kind: 'profileGroupExtension', profile: p, group: g, id });
 		type ViewName = 'groups' | 'profiles';
 		const provider = (view: ViewName) => api.views[view].provider as vscode.TreeDataProvider<any>;
 		const dnd = (view: ViewName) => api.views[view].dnd as vscode.TreeDragAndDropController<any>;
@@ -1125,12 +1127,74 @@ suite('Extension groups against a fake CLI', () => {
 				assert.strictEqual(((await item('profiles', profile('Odd'))).iconPath as vscode.ThemeIcon).id, 'account');
 			});
 
-			test('a profile lists the extensions it has, with their versions, sorted', async () => {
+			test('a profile lists the groups it follows first, then the extensions that are in none of them, sorted', async () => {
 				const kids = await children('profiles', profile('Python'));
-				assert.deepStrictEqual(kids.map(n => n.id), ['p.installed', 'shared.x']);
-				const i = await item('profiles', kids[0]);
+				assert.deepStrictEqual(kids.map(n => n.kind), ['profileGroup', 'profileGroup', 'profileExtension', 'profileExtension']);
+				assert.deepStrictEqual(kids.slice(0, 2).map(n => n.name), ['tools', 'web']);
+				assert.deepStrictEqual(kids.slice(2).map(n => n.id), ['p.installed', 'shared.x']);
+				const i = await item('profiles', kids[2]);
 				assert.strictEqual(i.contextValue, 'profileExtension');
 				assert.strictEqual(i.description, '1.0.0');
+			});
+
+			test('a profile that follows no group lists only its extensions', async () => {
+				writeGroups({ groups: { web: ['a.b'] }, profiles: {} });
+				const kids = await children('profiles', profile('Python'));
+				assert.deepStrictEqual(kids.map(n => n.kind), ['profileExtension', 'profileExtension']);
+			});
+
+			test('a group of a profile lists the extensions of the group that the profile has, and no others', async () => {
+				writeState({ Default: [], Python: ['a.b', 'p.installed'], Agents: [] });
+				const kids = await children('profiles', profileGroup('Python', 'web'));
+				assert.deepStrictEqual(kids.map(n => [n.kind, n.profile, n.group, n.id]), [['profileGroupExtension', 'Python', 'web', 'a.b']]);
+			});
+
+			test('an extension that is in a followed group is shown there and not among the other extensions', async () => {
+				writeState({ Default: [], Python: ['a.b', 'p.installed'], Agents: [] });
+				const kids = await children('profiles', profile('Python'));
+				assert.deepStrictEqual(kids.filter(n => n.kind === 'profileExtension').map(n => n.id), ['p.installed']);
+			});
+
+			test('a group of a profile says how many of its extensions the profile has', async () => {
+				writeState({ Default: [], Python: ['a.b'], Agents: [] });
+				const web = await item('profiles', profileGroup('Python', 'web'));
+				assert.strictEqual(web.contextValue, 'profileGroup');
+				assert.strictEqual(web.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+				assert.ok(String(web.description).includes('1 of 2'), String(web.description));
+				assert.ok(String(web.tooltip).includes('c.d'), 'the tooltip should name what is missing: ' + String(web.tooltip));
+			});
+
+			test('a group of a profile that has none of its extensions cannot be opened and says so', async () => {
+				const web = await item('profiles', profileGroup('Python', 'web'));
+				assert.strictEqual(web.collapsibleState, vscode.TreeItemCollapsibleState.None);
+				assert.ok(String(web.description).includes('0 of 2'), String(web.description));
+			});
+
+			test('a group extension of a profile shows the same icon, name and version', async () => {
+				writeState({ Default: [], Python: ['aaron-bond.better-comments'], Agents: [] });
+				writeGroups({ groups: { web: ['aaron-bond.better-comments'] }, profiles: { Python: ['web'] } });
+				await set('extensionsDir', path.resolve(__dirname, '../../test-fixtures/extensions'));
+				api.views.profiles.refresh();
+				const [node] = await children('profiles', profileGroup('Python', 'web'));
+				const i = await item('profiles', node);
+				assert.strictEqual(label(i), 'Better Comments');
+				assert.ok(i.iconPath instanceof vscode.Uri);
+				assert.strictEqual(i.description, '1.0.0');
+				assert.strictEqual(i.contextValue, 'profileGroupExtension');
+			});
+
+			test('a group that the file mentions for the profile but does not define is not shown', async () => {
+				writeGroups({ groups: { web: ['a.b'] }, profiles: { Python: ['web', 'ghost'] } });
+				const kids = await children('profiles', profile('Python'));
+				assert.deepStrictEqual(kids.filter(n => n.kind === 'profileGroup').map(n => n.name), ['web']);
+			});
+
+			test('the groups and the extensions come from one list: the command line is asked once', async () => {
+				const askedForPython = () => calls().filter(a => a.includes('--list-extensions') && a.includes('Python')).length;
+				await children('profiles', profile('Python'));
+				await children('profiles', profileGroup('Python', 'web'));
+				await children('profiles', profileGroup('Python', 'tools'));
+				assert.strictEqual(askedForPython(), 1);
 			});
 
 			test('the list is asked for once and cached until refresh', async () => {
@@ -1189,6 +1253,36 @@ suite('Extension groups against a fake CLI', () => {
 				assert.deepStrictEqual(installs(), [['--install-extension', 'a.b', '--profile', 'Python']]);
 				assert.ok(calls().every(a => !a.some(x => /uninstall|remove|disable/i.test(x))), 'dropping never uninstalls');
 				assert.deepStrictEqual(readState().Agents, ['shared.x'], 'other profiles are untouched');
+			});
+
+			test('an extension dragged out of a group of a profile counts as an extension of that profile', async () => {
+				const transfer = await drag('profiles', [profileGroupExt('Python', 'web', 'a.b')]);
+				await drop('groups', group('tools'), transfer);
+				assert.deepStrictEqual(readGroups().groups.tools, ['x.y', 'a.b']);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('a group of a profile can be dragged like the group, and dropped on another profile to give it', async () => {
+				const transfer = await drag('profiles', [profileGroup('Python', 'web')]);
+				await drop('profiles', profile('Agents'), transfer);
+				assert.ok((readGroups().profiles.Agents ?? []).includes('web'));
+			});
+
+			test('dropping on a group of a profile, or on one of its extensions, counts as dropping on that profile', async () => {
+				const onGroup = await drag('groups', [groupExt('web', 'a.b')]);
+				await drop('profiles', profileGroup('Agents', 'tools'), onGroup);
+				const onExtension = await drag('groups', [groupExt('web', 'c.d')]);
+				await drop('profiles', profileGroupExt('Agents', 'tools', 'x.y'), onExtension);
+				assert.deepStrictEqual(installs(), [
+					['--install-extension', 'a.b', '--profile', 'Agents'],
+					['--install-extension', 'c.d', '--profile', 'Agents'],
+				]);
+			});
+
+			test('a group of a profile dropped on an extension of the same profile does not give it twice', async () => {
+				const transfer = await drag('profiles', [profileGroup('Python', 'web')]);
+				await drop('profiles', profileGroupExt('Python', 'web', 'a.b'), transfer);
+				assert.deepStrictEqual(readGroups().profiles.Python, ['web']);
 			});
 
 			test('a group dropped on a profile is given to it', async () => {
@@ -1269,7 +1363,7 @@ suite('Extension groups against a fake CLI', () => {
 
 			test('an extension of a profile shows the same icon and name, with the version the command line reports', async () => {
 				writeState({ Default: [], Python: ['aaron-bond.better-comments'], Agents: [] });
-				const [node] = await children('profiles', profile('Python'));
+				const [node] = (await children('profiles', profile('Python'))).filter(n => n.kind === 'profileExtension');
 				const i = await item('profiles', node);
 				assert.strictEqual(label(i), 'Better Comments');
 				assert.ok(i.iconPath instanceof vscode.Uri);

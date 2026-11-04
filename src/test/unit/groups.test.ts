@@ -15,6 +15,7 @@ import {
 	commonToAllProfiles,
 	planCleanup,
 	promptKey,
+	profileLayout,
 	assignGroup,
 	desiredExtensions,
 	emptyGroups,
@@ -548,5 +549,68 @@ suite('removeGroup', () => {
 
 	test('a group that does not exist is an error', () => {
 		assert.throws(() => removeGroup(c, 'ghost'), /no group/i);
+	});
+});
+
+suite('profileLayout', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['A.One', 'b.two', 'c.three'], tools: ['d.four'], empty: [] },
+		profiles: { '*': ['tools'], Python: ['web', 'ghost'] },
+	};
+
+	test('puts the groups the profile follows first, each with the extensions it has installed', () => {
+		const layout = profileLayout(c, 'Python', ['a.one', 'b.two', 'd.four', 'x.other']);
+		assert.deepStrictEqual(layout.groups.map(g => g.name), ['tools', 'web']);
+		assert.deepStrictEqual(layout.groups.find(g => g.name === 'web')?.installed, ['a.one', 'b.two']);
+		assert.deepStrictEqual(layout.groups.find(g => g.name === 'tools')?.installed, ['d.four']);
+	});
+
+	test('what is left over, in no followed group, comes after as the other extensions', () => {
+		const layout = profileLayout(c, 'Python', ['a.one', 'd.four', 'x.other', 'y.other']);
+		assert.deepStrictEqual(layout.others, ['x.other', 'y.other']);
+	});
+
+	test('a group reports how many extensions it has in all', () => {
+		const web = profileLayout(c, 'Python', ['a.one']).groups.find(g => g.name === 'web');
+		assert.strictEqual(web?.total, 3);
+		assert.deepStrictEqual(web?.installed, ['a.one']);
+	});
+
+	test('ids match whatever their case, and keep the case the profile reports', () => {
+		const layout = profileLayout(c, 'Python', ['A.ONE']);
+		assert.deepStrictEqual(layout.groups.find(g => g.name === 'web')?.installed, ['A.ONE']);
+		assert.deepStrictEqual(layout.others, []);
+	});
+
+	test('an extension in a group the profile does not follow stays among the others', () => {
+		const layout = profileLayout(c, 'Agents', ['a.one', 'd.four']);
+		assert.deepStrictEqual(layout.groups.map(g => g.name), ['tools']);
+		assert.deepStrictEqual(layout.others, ['a.one']);
+	});
+
+	test('an extension in two followed groups shows under both and not among the others', () => {
+		const both: GroupsConfig = { groups: { a: ['x.y'], b: ['x.y'] }, profiles: { P: ['a', 'b'] } };
+		const layout = profileLayout(both, 'P', ['x.y']);
+		assert.deepStrictEqual(layout.groups.map(g => g.installed), [['x.y'], ['x.y']]);
+		assert.deepStrictEqual(layout.others, []);
+	});
+
+	test('a group that is followed but has nothing installed still shows, empty', () => {
+		const layout = profileLayout(c, 'Python', []);
+		assert.deepStrictEqual(layout.groups.map(g => [g.name, g.installed.length, g.total]), [['tools', 0, 1], ['web', 0, 3]]);
+	});
+
+	test('groups the file mentions but does not define are left out', () => {
+		assert.ok(!profileLayout(c, 'Python', []).groups.some(g => g.name === 'ghost'));
+	});
+
+	test('the others are sorted by id, without caring about case', () => {
+		const layout = profileLayout({ groups: {}, profiles: {} }, 'P', ['b.x', 'A.y', 'a.x']);
+		assert.deepStrictEqual(layout.others, ['a.x', 'A.y', 'b.x']);
+	});
+
+	test('no groups at all: everything is among the others', () => {
+		const layout = profileLayout({ groups: {}, profiles: {} }, 'P', ['a.b']);
+		assert.deepStrictEqual(layout, { groups: [], others: ['a.b'] });
 	});
 });
