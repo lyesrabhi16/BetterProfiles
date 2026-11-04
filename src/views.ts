@@ -202,9 +202,13 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 				item.description = `${have} of ${total} installed`;
 				item.contextValue = 'profileGroup';
 				item.iconPath = new vscode.ThemeIcon('package');
-				item.tooltip = have === total
-					? `${node.profile} has every extension of "${node.name}".`
-					: `${node.profile} lacks ${(group?.missing ?? []).join(', ')}. Sync the profile to install it.`;
+				const removed = (group?.excluded ?? []).filter(id => !group?.installed.some(have => have.toLowerCase() === id.toLowerCase()));
+				const lacking = group?.missing ?? [];
+				item.tooltip = [
+					...(lacking.length > 0 ? [`${node.profile} lacks ${lacking.join(', ')}. Sync the profile to install it.`] : []),
+					...(removed.length > 0 ? [`Removed from ${node.profile}: ${removed.join(', ')}. The group keeps it for the other profiles, and a sync does not install it here.`] : []),
+					...(lacking.length === 0 && removed.length === 0 ? [`${node.profile} has every extension of "${node.name}".`] : []),
+				].join('\n');
 				return item;
 			}
 			case 'profileGroupExtension':

@@ -410,10 +410,12 @@ export interface ProfileGroupLayout {
 	name: string;
 	/** The group's extensions that the profile has, with the id as the profile reports it. */
 	installed: string[];
-	/** How many extensions the group has for this profile (the ones the profile excludes are not counted). */
+	/** How many extensions the group has in all, the ones this profile removed included. */
 	total: number;
-	/** The ones the profile does not have. */
+	/** The ones the profile does not have and still wants: what a sync would install. */
 	missing: string[];
+	/** The ones the profile removed on purpose (it does not want them although the group has them). */
+	excluded: string[];
 }
 
 /**
@@ -430,11 +432,17 @@ export function profileLayout(config: GroupsConfig, profile: string, installedId
 		if (!has(config.groups, name)) {
 			continue;
 		}
-		const members = config.groups[name].filter(id => !excluded.has(id.toLowerCase()));
+		const members = config.groups[name];
 		const keys = members.map(id => id.toLowerCase());
 		const installed = keys.flatMap(id => byLowerCase.get(id) ?? []);
 		keys.forEach(id => inGroups.add(id));
-		groups.push({ name, installed: [...new Set(installed)], total: members.length, missing: members.filter(id => !byLowerCase.has(id.toLowerCase())) });
+		groups.push({
+			name,
+			installed: [...new Set(installed)],
+			total: members.length,
+			missing: members.filter(id => !byLowerCase.has(id.toLowerCase()) && !excluded.has(id.toLowerCase())),
+			excluded: members.filter(id => excluded.has(id.toLowerCase())),
+		});
 	}
 	const others = installedIds
 		.filter(id => !inGroups.has(id.toLowerCase()))

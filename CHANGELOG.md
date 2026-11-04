@@ -11,6 +11,8 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- A group inside a profile counted an extension the profile had removed out of its total ("2 of 2 installed"); the group has three, so
+  it reads "2 of 3 installed", and the tooltip says which one was removed from the profile (a sync does not install it).
 - The Profiles tree kept showing a profile's old list of extensions after something was installed into or uninstalled from it: the
   refresh named an item object VS Code did not know and was ignored. It now redraws the whole tree.
 - The **New Group** button of the Groups view did not ask for a name when a group was selected: VS Code runs a title-bar
