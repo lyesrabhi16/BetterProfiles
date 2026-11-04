@@ -229,8 +229,7 @@ nix develop .#headless -c xvfb-run -a npm test
 The shell sets `BETTER_PROFILES_VSCODE` to that VS Code. It is not put on your PATH, so it never replaces the `code` you
 use; set the variable yourself first to test against another build. The tests pass on VS Code 1.119.0 and on 1.144.0,
 the version `flake.lock` pins at the time of writing. `nix flake update` moves the pin. A flake only sees files git knows
-about, so `git add` new files before running `nix develop`. With direnv, `echo "use flake" > .envrc` loads the shell
-automatically.
+about, so `git add` new files before running `nix develop`.
 
 ### Without Nix
 

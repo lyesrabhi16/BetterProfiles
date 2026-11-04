@@ -33,8 +33,11 @@
           default = pkgs.mkShell {
             packages = tools;
             shellHook = useNixVscode + ''
-              echo "Better Profiles dev shell: node $(node --version), VS Code for the tests: $BETTER_PROFILES_VSCODE"
-              echo "  npm ci && npm run test:unit && npm test"
+              # no banner when direnv loads the shell: it would repeat on every reload
+              if [ -z "$DIRENV_IN_ENVRC" ]; then
+                echo "Better Profiles dev shell: node $(node --version), VS Code for the tests: $BETTER_PROFILES_VSCODE"
+                echo "  npm ci && npm run test:unit && npm test"
+              fi
             '';
           };
 
@@ -45,7 +48,9 @@
             shellHook = useNixVscode + ''
               export BETTER_PROFILES_HEADLESS=1 # no GPU, X11, no sandbox: the flags Xvfb needs
               unset WAYLAND_DISPLAY # Electron must use the virtual X display
-              echo "Better Profiles headless shell: run  xvfb-run -a npm test"
+              if [ -z "$DIRENV_IN_ENVRC" ]; then
+                echo "Better Profiles headless shell: run  xvfb-run -a npm test"
+              fi
             '';
           };
         });
