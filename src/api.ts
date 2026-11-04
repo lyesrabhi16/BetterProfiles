@@ -29,6 +29,13 @@ export interface PromptUi {
 	confirm(message: string, detail: string, action: string): Promise<boolean>;
 }
 
+/** What the tests need to reach in a tree view of the Better Profiles tab. */
+export interface TreeViewHandles {
+	provider: vscode.TreeDataProvider<unknown>;
+	dnd: vscode.TreeDragAndDropController<unknown>;
+	refresh(): void;
+}
+
 /** What `activate()` returns, so other extensions (and the tests) can use it. */
 export interface BetterProfilesApi {
 	/** The profile of this window, or undefined when VS Code gives no way to tell. */
@@ -45,6 +52,8 @@ export interface BetterProfilesApi {
 	resetPrompts(): Promise<void>;
 	/** The ids (lower-case) of the extensions that are in some group: the list the Extensions view's menu uses. */
 	groupedExtensions(): readonly string[];
+	/** The two trees of the Better Profiles tab. */
+	readonly views: { groups: TreeViewHandles; profiles: TreeViewHandles };
 	readonly ui: PromptUi;
 	readonly statusBarItem: vscode.StatusBarItem;
 }

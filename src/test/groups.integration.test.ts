@@ -988,4 +988,256 @@ suite('Extension groups against a fake CLI', () => {
 		});
 	});
 
+
+	suite('the Better Profiles tab', () => {
+		const GROUPS_MIME = 'application/vnd.code.tree.betterprofiles.groups';
+		const PROFILES_MIME = 'application/vnd.code.tree.betterprofiles.profiles';
+		const token = new vscode.CancellationTokenSource().token;
+		type Node = Record<string, unknown>;
+		const group = (name: string): Node => ({ kind: 'group', name });
+		const groupExt = (g: string, id: string): Node => ({ kind: 'groupExtension', group: g, id });
+		const profile = (name: string): Node => ({ kind: 'profile', name });
+		const profileExt = (p: string, id: string): Node => ({ kind: 'profileExtension', profile: p, id });
+		type ViewName = 'groups' | 'profiles';
+		const provider = (view: ViewName) => api.views[view].provider as vscode.TreeDataProvider<any>;
+		const dnd = (view: ViewName) => api.views[view].dnd as vscode.TreeDragAndDropController<any>;
+		const children = async (view: ViewName, node?: Node): Promise<Node[]> => (await provider(view).getChildren(node)) ?? [];
+		const item = async (view: ViewName, node: Node) => provider(view).getTreeItem(node) as vscode.TreeItem;
+		const label = (i: vscode.TreeItem) => (typeof i.label === 'string' ? i.label : i.label?.label);
+		const drag = async (view: ViewName, nodes: Node[]) => {
+			const transfer = new vscode.DataTransfer();
+			await dnd(view).handleDrag?.(nodes, transfer, token);
+			return transfer;
+		};
+		const drop = (view: ViewName, target: Node | undefined, transfer: vscode.DataTransfer) => dnd(view).handleDrop?.(target, transfer, token);
+		const until = async (condition: () => boolean, ms = 3000) => {
+			const end = Date.now() + ms;
+			while (!condition() && Date.now() < end) {
+				await new Promise(resolve => setTimeout(resolve, 25));
+			}
+			return condition();
+		};
+
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			writeState({ Default: ['common.one'], Python: ['p.installed', 'shared.x'], Agents: ['shared.x'] });
+			writeGroups({ groups: { web: ['a.b', 'c.d'], tools: ['x.y'], empty: [] }, profiles: { Python: ['web'], '*': ['tools'] } });
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		suite('contributions', () => {
+			const contributes = () => vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
+			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup'].map(c => `better-profiles.view.${c}`);
+
+			test('an activity bar container called Better Profiles with a Groups and a Profiles view', () => {
+				const containers: { id: string; title: string; icon: string }[] = contributes().viewsContainers?.activitybar ?? [];
+				const container = containers.find(c => c.title === 'Better Profiles');
+				assert.ok(container, JSON.stringify(containers));
+				assert.ok(fs.existsSync(path.resolve(__dirname, '../..', container!.icon)), 'the icon file must exist: ' + container!.icon);
+				const views: { id: string }[] = contributes().views?.[container!.id] ?? [];
+				assert.deepStrictEqual(views.map(v => v.id), ['betterProfiles.groups', 'betterProfiles.profiles']);
+			});
+
+			test('the commands used by the trees are declared, registered, and kept out of the Command Palette', async () => {
+				const declared = (contributes().commands as { command: string }[]).map(c => c.command);
+				const registered = new Set(await vscode.commands.getCommands(true));
+				const palette: { command: string; when: string }[] = contributes().menus?.commandPalette ?? [];
+				for (const id of VIEW_COMMANDS) {
+					assert.ok(declared.includes(id), 'declared ' + id);
+					assert.ok(registered.has(id), 'registered ' + id);
+					assert.ok(palette.some(p => p.command === id && p.when === 'false'), 'hidden from the palette: ' + id);
+				}
+			});
+
+			test('item menus only apply to the right kind of item', () => {
+				const entries: { command: string; when: string }[] = contributes().menus?.['view/item/context'] ?? [];
+				const whenOf = (command: string) => entries.find(e => e.command === command)?.when ?? '';
+				assert.ok(whenOf('better-profiles.view.deleteGroup').includes('viewItem == group'));
+				assert.ok(whenOf('better-profiles.view.removeFromGroup').includes('viewItem == groupExtension'));
+				assert.ok(whenOf('better-profiles.view.syncProfile').includes('viewItem == profile'));
+			});
+		});
+
+		suite('the Groups tree', () => {
+			test('lists the groups, how many extensions each has and which profiles follow it', async () => {
+				const roots = await children('groups');
+				assert.deepStrictEqual(roots.map(n => n.name), ['web', 'tools', 'empty']);
+				const [web, tools, empty] = await Promise.all(roots.map(n => item('groups', n)));
+				assert.ok(String(web.description).includes('2 extensions') && String(web.description).includes('Python'), String(web.description));
+				assert.ok(String(tools.description).includes('1 extension') && /all profiles/i.test(String(tools.description)), String(tools.description));
+				assert.ok(String(empty.description).includes('0 extensions'), String(empty.description));
+				assert.strictEqual(web.contextValue, 'group');
+			});
+
+			test('a group lists its extensions', async () => {
+				const kids = await children('groups', group('web'));
+				assert.deepStrictEqual(kids, [groupExt('web', 'a.b'), groupExt('web', 'c.d')]);
+				const i = await item('groups', kids[0]);
+				assert.strictEqual(label(i), 'a.b');
+				assert.strictEqual(i.contextValue, 'groupExtension');
+			});
+
+			test('no groups file means no items (the welcome text shows instead)', async () => {
+				fs.rmSync(groupsFile);
+				assert.deepStrictEqual(await children('groups'), []);
+			});
+
+			test('a broken groups file is reported as an item, not an error', async () => {
+				fs.writeFileSync(groupsFile, '{ broken');
+				const roots = await children('groups');
+				assert.strictEqual(roots.length, 1);
+				assert.strictEqual(roots[0].kind, 'message');
+				assert.ok(/groups file/i.test(String(roots[0].text)), String(roots[0].text));
+			});
+
+			test('it refreshes when a command changes the groups', async () => {
+				let fired = 0;
+				const subscription = provider('groups').onDidChangeTreeData?.(() => fired++);
+				await exec('better-profiles.addToGroup', { group: 'web', extensions: ['z.new'] });
+				assert.ok(await until(() => fired > 0), 'the tree should have been told to refresh');
+				subscription?.dispose();
+			});
+		});
+
+		suite('the Profiles tree', () => {
+			test('lists Default and every profile, and marks the one of this window', async () => {
+				const roots = await children('profiles');
+				assert.deepStrictEqual(roots.map(n => n.name), ['Default', 'Python', 'Agents']);
+				const items = await Promise.all(roots.map(n => item('profiles', n)));
+				assert.ok(String(items[1].description).includes('current'), String(items[1].description));
+				assert.ok(!String(items[0].description ?? '').includes('current'));
+				assert.strictEqual(items[0].contextValue, 'profile');
+			});
+
+			test('a profile lists the extensions it has, with their versions, sorted', async () => {
+				const kids = await children('profiles', profile('Python'));
+				assert.deepStrictEqual(kids.map(n => n.id), ['p.installed', 'shared.x']);
+				const i = await item('profiles', kids[0]);
+				assert.strictEqual(i.contextValue, 'profileExtension');
+				assert.strictEqual(i.description, '1.0.0');
+			});
+
+			test('the list is asked for once and cached until refresh', async () => {
+				const askedForPython = () => calls().filter(a => a.includes('--list-extensions') && a.includes('Python')).length;
+				await children('profiles', profile('Python'));
+				await children('profiles', profile('Python'));
+				assert.strictEqual(askedForPython(), 1);
+				api.views.profiles.refresh();
+				await children('profiles', profile('Python'));
+				assert.strictEqual(askedForPython(), 2);
+			});
+
+			test('when the command line cannot be found it says so as an item, without starting anything', async () => {
+				await set('codeCommand', undefined);
+				await set('codeArgs', undefined);
+				const kids = await children('profiles', profile('Python'));
+				assert.strictEqual(kids.length, 1);
+				assert.strictEqual(kids[0].kind, 'message');
+				assert.ok(/extensions/i.test(String(kids[0].text)), String(kids[0].text));
+				assert.deepStrictEqual(calls(), []);
+			});
+		});
+
+		suite('drag and drop', () => {
+			test('both trees accept drops from both trees', () => {
+				for (const view of ['groups', 'profiles'] as const) {
+					assert.ok(dnd(view).dropMimeTypes.includes(GROUPS_MIME), view + ' accepts groups');
+					assert.ok(dnd(view).dropMimeTypes.includes(PROFILES_MIME), view + ' accepts profiles');
+				}
+			});
+
+			test('an extension of a profile dropped on a group is added to it, without running any CLI', async () => {
+				const transfer = await drag('profiles', [profileExt('Python', 'p.installed')]);
+				await drop('groups', group('web'), transfer);
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d', 'p.installed']);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('an extension dragged from one group to another is copied: the first group keeps it', async () => {
+				const transfer = await drag('groups', [groupExt('web', 'a.b')]);
+				await drop('groups', group('tools'), transfer);
+				assert.deepStrictEqual(readGroups().groups.tools, ['x.y', 'a.b']);
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
+			});
+
+			test('dropping on an extension of a group counts as dropping on that group', async () => {
+				const transfer = await drag('profiles', [profileExt('Python', 'p.installed')]);
+				await drop('groups', groupExt('tools', 'x.y'), transfer);
+				assert.deepStrictEqual(readGroups().groups.tools, ['x.y', 'p.installed']);
+			});
+
+			test('extensions of a group dropped on a profile are installed into that profile, skipping those it has', async () => {
+				writeGroups({ groups: { web: ['a.b', 'p.installed'] } });
+				const transfer = await drag('groups', [groupExt('web', 'a.b'), groupExt('web', 'p.installed')]);
+				await drop('profiles', profile('Python'), transfer);
+				assert.deepStrictEqual(installs(), [['--install-extension', 'a.b', '--profile', 'Python']]);
+				assert.ok(calls().every(a => !a.some(x => /uninstall|remove|disable/i.test(x))), 'dropping never uninstalls');
+				assert.deepStrictEqual(readState().Agents, ['shared.x'], 'other profiles are untouched');
+			});
+
+			test('a group dropped on a profile is given to it', async () => {
+				const transfer = await drag('groups', [group('web')]);
+				await drop('profiles', profile('Agents'), transfer);
+				assert.ok((readGroups().profiles.Agents ?? []).includes('web'));
+			});
+
+			test('dropping on empty space, or items that cannot be dragged, changes nothing', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				await drop('groups', undefined, await drag('profiles', [profileExt('Python', 'p.installed')]));
+				const nothing = await drag('profiles', [profile('Python'), { kind: 'message', text: 'hello' }]);
+				assert.strictEqual(nothing.get(PROFILES_MIME), undefined, 'profiles and messages are not draggable');
+				await drop('groups', group('web'), nothing);
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('the trees refresh after a drop', async () => {
+				let fired = 0;
+				const subscription = provider('groups').onDidChangeTreeData?.(() => fired++);
+				await drop('groups', group('web'), await drag('profiles', [profileExt('Python', 'p.installed')]));
+				assert.ok(await until(() => fired > 0));
+				subscription?.dispose();
+			});
+		});
+
+		suite('commands on the trees', () => {
+			test('New Group creates an empty group, and leaves an existing one alone', async () => {
+				await exec('better-profiles.view.newGroup', { name: 'fresh' });
+				assert.deepStrictEqual(readGroups().groups.fresh, []);
+				await exec('better-profiles.view.newGroup', { name: 'web' });
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d']);
+			});
+
+			test('Remove From Group takes the extension out of that group only, and uninstalls nothing', async () => {
+				await exec('better-profiles.view.removeFromGroup', groupExt('web', 'a.b'));
+				assert.deepStrictEqual(readGroups().groups.web, ['c.d']);
+				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('Delete Group asks first, and then removes the group and every mention of it', async () => {
+				answer({ confirm: () => true });
+				await exec('better-profiles.view.deleteGroup', group('web'));
+				assert.ok(/web/.test(seen.confirm[0].message) && /Python/.test(seen.confirm[0].detail), seen.confirm[0].message + ' | ' + seen.confirm[0].detail);
+				const file = readGroups() as GroupsConfig;
+				assert.ok(!('web' in file.groups));
+				assert.ok(!('Python' in file.profiles));
+			});
+
+			test('declining Delete Group changes nothing', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				answer({ confirm: () => false });
+				await exec('better-profiles.view.deleteGroup', group('web'));
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
+			});
+
+			test('Sync Profile on a profile starts the sync for that profile', async () => {
+				answer({ confirm: () => false });
+				await exec('better-profiles.view.syncProfile', profile('Python'));
+				assert.strictEqual(seen.confirm.length, 1, 'a.b and c.d are missing from Python, so it should ask before installing');
+				assert.ok(seen.confirm[0].message.includes('Python'), seen.confirm[0].message);
+			});
+		});
+	});
+
 });

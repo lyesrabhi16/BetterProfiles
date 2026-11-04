@@ -68,6 +68,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		resetPrompts: () => groups.resetPrompts(),
 		groupedExtensions: () => groups.groupedExtensions(),
 		ui,
+		get views(): BetterProfilesApi['views'] { throw new Error('not implemented'); },
 		statusBarItem,
 	};
 

@@ -328,3 +328,8 @@ export function profilesFollowing(config: GroupsConfig, group: string): string[]
 export function groupedExtensionIds(config: GroupsConfig): string[] {
 	return [...new Set(Object.values(config.groups).flat().map(id => id.toLowerCase()))];
 }
+
+/** Deletes a group, its triggers, and every profile's mention of it. The extensions themselves are untouched. */
+export function removeGroup(_config: GroupsConfig, _group: string): GroupsConfig {
+	throw new Error('not implemented');
+}

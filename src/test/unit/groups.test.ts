@@ -8,6 +8,7 @@ import {
 	groupsContaining,
 	profilesFollowing,
 	removeFromGroup,
+	removeGroup,
 	isTriggerPattern,
 	setTriggers,
 	triggeredGroups,
@@ -517,5 +518,35 @@ suite('groupedExtensionIds', () => {
 
 	test('no groups, no extensions', () => {
 		assert.deepStrictEqual(groupedExtensionIds({ groups: {}, profiles: {} }), []);
+	});
+});
+
+suite('removeGroup', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['a.b'], tools: ['c.d'] },
+		profiles: { '*': ['tools'], Python: ['web', 'tools'], Rust: ['web'] },
+		triggers: { web: ['**/package.json'], tools: ['**/Makefile'] },
+	};
+
+	test('deletes the group, its triggers and every mention of it', () => {
+		const next = removeGroup(c, 'web');
+		assert.deepStrictEqual(next.groups, { tools: ['c.d'] });
+		assert.deepStrictEqual(next.triggers, { tools: ['**/Makefile'] });
+		assert.deepStrictEqual(next.profiles, { '*': ['tools'], Python: ['tools'] });
+	});
+
+	test('a profile left with no groups is dropped from the file', () => {
+		assert.ok(!('Rust' in removeGroup(c, 'web').profiles));
+	});
+
+	test('leaves the original untouched, and drops the triggers key when none are left', () => {
+		const noTriggers: GroupsConfig = { groups: { web: ['a.b'] }, profiles: {}, triggers: { web: ['**/x'] } };
+		assert.ok(!('triggers' in removeGroup(noTriggers, 'web')));
+		removeGroup(c, 'web');
+		assert.deepStrictEqual(Object.keys(c.groups), ['web', 'tools']);
+	});
+
+	test('a group that does not exist is an error', () => {
+		assert.throws(() => removeGroup(c, 'ghost'), /no group/i);
 	});
 });
