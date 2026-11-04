@@ -147,4 +147,68 @@ suite('ExtensionCatalog', () => {
 		current = dir;
 		assert.strictEqual((await catalog.lookup('x.here'))?.name, 'here');
 	});
+
+	suite('incremental: only what changed is looked at again', () => {
+		const manifest = (name: string) => ({ name, displayName: name, publisher: 'x', version: '1.0.0' });
+		const setMtime = (folder: string, seconds: number) => fs.utimesSync(path.join(dir, folder, 'package.json'), seconds, seconds);
+
+		test('clear keeps what was read from each extension: a second round of lookups reads no manifest again', async () => {
+			install('x.one-1.0.0', manifest('one'));
+			install('x.two-1.0.0', manifest('two'));
+			const catalog = new ExtensionCatalog(() => dir);
+			await catalog.lookup('x.one');
+			await catalog.lookup('x.two');
+			assert.strictEqual(catalog.stats.manifests, 2);
+			catalog.clear();
+			assert.strictEqual((await catalog.lookup('x.one'))?.name, 'one');
+			assert.strictEqual((await catalog.lookup('x.two'))?.name, 'two');
+			assert.strictEqual(catalog.stats.manifests, 2, 'nothing was read again');
+		});
+
+		test('clear still makes it look at the folder again, so a new extension is found', async () => {
+			const catalog = new ExtensionCatalog(() => dir);
+			assert.strictEqual(await catalog.lookup('x.late'), undefined);
+			install('x.late-1.0.0', manifest('late'));
+			catalog.clear();
+			assert.strictEqual((await catalog.lookup('x.late'))?.name, 'late');
+		});
+
+		test('an extension whose manifest changed (a reinstall of the same version) is read again, and only that one', async () => {
+			install('x.one-1.0.0', manifest('one'));
+			install('x.two-1.0.0', manifest('two'));
+			setMtime('x.one-1.0.0', 1_000_000);
+			setMtime('x.two-1.0.0', 1_000_000);
+			const catalog = new ExtensionCatalog(() => dir);
+			await catalog.lookup('x.one');
+			await catalog.lookup('x.two');
+			fs.writeFileSync(path.join(dir, 'x.one-1.0.0', 'package.json'), JSON.stringify(manifest('one renamed')));
+			setMtime('x.one-1.0.0', 1_000_100);
+			catalog.clear();
+			assert.strictEqual((await catalog.lookup('x.one'))?.name, 'one renamed');
+			await catalog.lookup('x.two');
+			assert.strictEqual(catalog.stats.manifests, 3, 'two first reads and the one that changed');
+		});
+
+		test('a folder named by the caller is used without listing the extensions folder', async () => {
+			install('x.one-1.0.0', manifest('one'));
+			const catalog = new ExtensionCatalog(() => dir);
+			assert.strictEqual((await catalog.lookup('x.one', '1.0.0', 'x.one-1.0.0'))?.name, 'one');
+			assert.strictEqual(catalog.stats.listings, 0);
+		});
+
+		test('a named folder that is not a plain folder name is ignored: the usual lookup is used', async () => {
+			install('x.one-1.0.0', manifest('one'));
+			fs.mkdirSync(path.join(dir, '..', 'bp-outside'), { recursive: true });
+			const catalog = new ExtensionCatalog(() => dir);
+			for (const hint of ['../bp-outside', '/etc', 'a/b', '..']) {
+				assert.strictEqual((await catalog.lookup('x.one', undefined, hint))?.name, 'one', hint);
+			}
+		});
+
+		test('a named folder that is not there is not believed: the usual lookup is used', async () => {
+			install('x.one-1.0.0', manifest('one'));
+			const catalog = new ExtensionCatalog(() => dir);
+			assert.strictEqual((await catalog.lookup('x.one', undefined, 'x.one-9.9.9'))?.name, 'one');
+		});
+	});
 });
