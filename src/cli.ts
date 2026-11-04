@@ -35,6 +35,8 @@ export interface ResolveOptions {
 export interface InstalledExtension {
 	id: string;
 	version?: string;
+	/** Its folder in the extensions folder, when the source of the list says (the command line does not). */
+	folder?: string;
 }
 
 export interface InstallResult {
