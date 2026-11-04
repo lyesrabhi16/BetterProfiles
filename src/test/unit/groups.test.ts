@@ -5,6 +5,7 @@ import {
 	addToGroup,
 	assignedGroups,
 	groupsContaining,
+	profilesFollowing,
 	removeFromGroup,
 	isTriggerPattern,
 	setTriggers,
@@ -484,5 +485,25 @@ suite('removeFromGroup', () => {
 	test('a config without triggers stays without a triggers key', () => {
 		const plain: GroupsConfig = { groups: { g: ['a.b'] }, profiles: {} };
 		assert.ok(!('triggers' in removeFromGroup(plain, 'g', 'a.b')));
+	});
+});
+
+suite('profilesFollowing', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['a.b'], tools: ['c.d'], unused: [] },
+		profiles: { '*': ['tools'], Python: ['web'], Rust: ['web', 'tools'] },
+	};
+
+	test('lists the profiles that follow the group, in file order', () => {
+		assert.deepStrictEqual(profilesFollowing(c, 'web'), ['Python', 'Rust']);
+	});
+
+	test('"*" counts: a group given to every profile is followed', () => {
+		assert.deepStrictEqual(profilesFollowing(c, 'tools'), ['*', 'Rust']);
+	});
+
+	test('a group nobody follows gives an empty list', () => {
+		assert.deepStrictEqual(profilesFollowing(c, 'unused'), []);
+		assert.deepStrictEqual(profilesFollowing(c, 'nope'), []);
 	});
 });

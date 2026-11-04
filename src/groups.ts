@@ -318,3 +318,8 @@ export function removeFromGroup(config: GroupsConfig, group: string, id: string)
 	}
 	return { ...config, groups: { ...config.groups, [group]: kept } };
 }
+
+/** The profiles (and "*" for every profile) that follow a group, in the order of the file. */
+export function profilesFollowing(_config: GroupsConfig, _group: string): string[] {
+	throw new Error('not implemented');
+}

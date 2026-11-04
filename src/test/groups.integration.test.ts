@@ -773,4 +773,101 @@ suite('Extension groups against a fake CLI', () => {
 		});
 	});
 
+
+	suite('buttons on the notifications that follow a change to the groups', () => {
+		const ADD_FROM_MENU = 'better-profiles.extensionAddToGroup';
+		const ASSIGN = 'better-profiles.assignGroup';
+		const SYNC = 'Sync Profile…';
+		const GIVE = 'Give Group To A Profile…';
+		const until = async (condition: () => boolean, ms = 3000) => {
+			const end = Date.now() + ms;
+			while (!condition() && Date.now() < end) {
+				await new Promise(resolve => setTimeout(resolve, 25));
+			}
+			return condition();
+		};
+
+		setup(async () => {
+			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			writeState({ Default: [], Python: [], Agents: [] });
+			writeGroups({ groups: { web: ['a.b'] }, profiles: { Python: ['web'] } });
+			answer({});
+		});
+		teardown(() => restoreUi());
+
+		test('after adding to a group that a profile follows, the notification offers to sync (instead of telling you to run a command)', async () => {
+			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' });
+			assert.ok(await until(() => seen.ask.length > 0), 'a notification should have been shown');
+			assert.ok(seen.ask[0].message.includes('x.new') && seen.ask[0].message.includes('web'), seen.ask[0].message);
+			assert.ok(!seen.ask[0].message.includes('Run "Sync'), 'the instruction text is replaced by a button: ' + seen.ask[0].message);
+			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);
+		});
+
+		test('after adding to a group that no profile follows, syncing would do nothing, so it offers to give the group to a profile', async () => {
+			writeGroups({ groups: { web: ['a.b'], lonely: [] } });
+			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'lonely' });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.deepStrictEqual(seen.ask[0].buttons, [GIVE]);
+		});
+
+		test('a group given to every profile ("*") counts as followed', async () => {
+			writeGroups({ groups: { web: ['a.b'] }, profiles: { '*': ['web'] } });
+			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);
+		});
+
+		test('clicking "Sync Profile…" starts the sync flow, which asks which profile', async () => {
+			answer({ ask: () => SYNC, pickOne: () => undefined });
+			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' });
+			assert.ok(await until(() => seen.pickOne.some(p => p.title === 'Sync which profile with its groups?')), 'the sync flow should have started');
+		});
+
+		test('clicking "Give Group To A Profile…" asks which profile, for that group, and gives it', async () => {
+			writeGroups({ groups: { web: ['a.b'], lonely: ['c.d'] } });
+			answer({ ask: () => GIVE, pickOne: title => (title === 'Give a group to which profile?' ? 'Python' : undefined) });
+			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'lonely' });
+			assert.ok(await until(() => (readGroups().profiles?.Python ?? []).includes('lonely')), 'the group should now be given to Python');
+			assert.ok(seen.pickOne.every(p => p.title !== 'Which group should "Python" have?'), 'it must not ask for the group again');
+		});
+
+		test('dismissing the notification does nothing more', async () => {
+			answer({ ask: () => undefined });
+			await exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' });
+			await until(() => seen.ask.length > 0);
+			await new Promise(resolve => setTimeout(resolve, 300));
+			assert.strictEqual(seen.pickOne.length, 0);
+		});
+
+		test('the command does not wait for the notification: it finishes while the user has not answered', async () => {
+			answer({ ask: () => new Promise<string | undefined>(() => { /* the user never answers */ }) as unknown as string });
+			const outcome = await Promise.race([
+				exec(ADD_FROM_MENU, { id: 'x.new', group: 'web' }).then(() => 'finished'),
+				new Promise(resolve => setTimeout(() => resolve('still waiting'), 3000)),
+			]);
+			assert.strictEqual(outcome, 'finished');
+			assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'x.new']);
+		});
+
+		test('after giving a group to a profile, the notification offers to sync it', async () => {
+			await exec(ASSIGN, { profile: 'Agents', group: 'web' });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.ok(seen.ask[0].message.includes('Agents') && seen.ask[0].message.includes('web'), seen.ask[0].message);
+			assert.ok(!seen.ask[0].message.includes('Run "Sync'), seen.ask[0].message);
+			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);
+		});
+
+		test('for every profile the notification says so', async () => {
+			await exec(ASSIGN, { profile: '*', group: 'web' });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.ok(/all profiles/i.test(seen.ask[0].message), seen.ask[0].message);
+		});
+
+		test('the older "Add Extensions To Group…" command has the same follow-up', async () => {
+			await exec('better-profiles.addToGroup', { group: 'web', extensions: ['x.new'] });
+			assert.ok(await until(() => seen.ask.length > 0));
+			assert.deepStrictEqual(seen.ask[0].buttons, [SYNC]);
+		});
+	});
+
 });
