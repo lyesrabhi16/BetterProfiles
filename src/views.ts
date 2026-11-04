@@ -21,6 +21,7 @@ export interface ViewsCore {
 	currentProfileName(): Promise<string | undefined>;
 }
 
+export type ExtensionNode = Extract<Node, { kind: 'groupExtension' | 'profileGroupExtension' | 'profileExtension' }>;
 export type Node =
 	| { kind: 'group'; name: string }
 	| { kind: 'groupExtension'; group: string; id: string }
@@ -37,9 +38,11 @@ const PROFILES_VIEW = 'betterProfiles.profiles';
 const SOURCES_MIME = 'application/vnd.better-profiles.sources';
 
 /** An extension as VS Code's Extensions list shows it: its icon image and its display name; the id when it is not found. */
-function extensionItem(id: string, info: ExtensionInfo | undefined, contextValue: string): vscode.TreeItem {
+function extensionItem(id: string, info: ExtensionInfo | undefined, node: ExtensionNode): vscode.TreeItem {
 	const item = new vscode.TreeItem(info?.name ?? id, vscode.TreeItemCollapsibleState.None);
-	item.contextValue = contextValue;
+	item.contextValue = node.kind;
+	// a click runs this; two clicks in a row on the same item open the page (see better-profiles.view.clickExtension)
+	item.command = { command: 'better-profiles.view.clickExtension', title: 'Open Extension Page', arguments: [node] };
 	item.iconPath = info?.iconPath ? vscode.Uri.file(info.iconPath) : new vscode.ThemeIcon('extensions');
 	item.tooltip = info
 		? [info.name, `${id}${info.version ? ` v${info.version}` : ''}`, ...(info.description ? [info.description] : [])].join('\n')
@@ -95,7 +98,7 @@ class GroupsProvider implements vscode.TreeDataProvider<Node> {
 			}
 			case 'groupExtension': {
 				const info = await this.catalog.lookup(node.id);
-				const item = extensionItem(node.id, info, 'groupExtension');
+				const item = extensionItem(node.id, info, node);
 				item.description = info ? info.publisher : this.catalog.known() ? 'not installed' : undefined;
 				return item;
 			}
@@ -199,7 +202,7 @@ class ProfilesProvider implements vscode.TreeDataProvider<Node> {
 			}
 			case 'profileGroupExtension':
 			case 'profileExtension': {
-				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version), node.kind);
+				const item = extensionItem(node.id, await this.catalog.lookup(node.id, node.version), node);
 				item.description = node.version;
 				return item;
 			}
@@ -365,6 +368,27 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 		return arg as Extract<Node, { kind: K }>;
 	};
 
+	const EXTENSION_KINDS = ['groupExtension', 'profileGroupExtension', 'profileExtension'];
+	const extensionNodeOf = (arg: unknown): ExtensionNode => {
+		if (!EXTENSION_KINDS.includes((arg as Node | undefined)?.kind ?? '')) {
+			throw new Error('This command works on an item of the Better Profiles tab.');
+		}
+		return arg as ExtensionNode;
+	};
+	/** A group, in the Groups tree or inside a profile: either way the group itself. */
+	const groupNameOf = (arg: unknown): string => {
+		const kind = (arg as Node | undefined)?.kind;
+		if (kind !== 'group' && kind !== 'profileGroup') {
+			throw new Error('This command works on an item of the Better Profiles tab.');
+		}
+		return (arg as { name: string }).name;
+	};
+
+	// Two clicks in a row on the same item count as a double click: the tree tells an extension only about clicks.
+	const DOUBLE_CLICK_MS = 500;
+	let lastClick: { key: string; at: number } | undefined;
+	const clickKey = (node: ExtensionNode) => [node.kind, 'profile' in node ? node.profile : '', 'group' in node ? node.group : '', node.id.toLowerCase()].join('|');
+
 	const command = (id: string, handler: (...args: never[]) => unknown) => vscode.commands.registerCommand(id, async (...args: unknown[]) => {
 		try {
 			return await (handler as (...a: unknown[]) => unknown)(...args);
@@ -401,8 +425,37 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 				await core.saveGroups(file, addToGroup(config, name, []));
 			}),
 
+			command('better-profiles.view.clickExtension', async (arg?: unknown) => {
+				const node = extensionNodeOf(arg);
+				// when VS Code is set to open items on a double click it already runs this only for one
+				const key = clickKey(node);
+				const now = Date.now();
+				const doubleClicks = vscode.workspace.getConfiguration('workbench.list').get('openMode') === 'doubleClick';
+				if (doubleClicks || (lastClick?.key === key && now - lastClick.at <= DOUBLE_CLICK_MS)) {
+					lastClick = undefined;
+					await ui.openExtension(node.id);
+				} else {
+					lastClick = { key, at: now };
+				}
+			}),
+
+			command('better-profiles.view.openExtension', (arg?: unknown) => ui.openExtension(extensionNodeOf(arg).id)),
+
+			command('better-profiles.view.copyExtensionId', async (arg?: unknown) => {
+				const { id } = extensionNodeOf(arg);
+				await vscode.env.clipboard.writeText(id);
+				vscode.window.setStatusBarMessage(`Copied ${id}`, 2500);
+			}),
+
+			// Only the id is passed on: these commands read other fields (a "group", say) of what they are given as answers.
+			command('better-profiles.view.addExtensionToGroup', (arg?: unknown) =>
+				vscode.commands.executeCommand('better-profiles.extensionAddToGroup', extensionNodeOf(arg).id)),
+
+			command('better-profiles.view.installExtensionInProfiles', (arg?: unknown) =>
+				vscode.commands.executeCommand('better-profiles.extensionInstallInProfiles', extensionNodeOf(arg).id)),
+
 			command('better-profiles.view.deleteGroup', async (arg?: unknown) => {
-				const { name } = nodeOf(arg, 'group');
+				const name = groupNameOf(arg);
 				const { config, file } = await core.loadGroups();
 				const followers = profilesFollowing(config, name).map(profile => (profile === ALL_PROFILES ? 'all profiles' : profile));
 				const confirmed = await ui.confirm(
@@ -416,7 +469,11 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 			}),
 
 			command('better-profiles.view.removeFromGroup', async (arg?: unknown) => {
-				const { group, id } = nodeOf(arg, 'groupExtension');
+				const node = extensionNodeOf(arg);
+				if (node.kind === 'profileExtension') {
+					throw new Error('This extension is not in a group of this profile.');
+				}
+				const { group, id } = node;
 				const { config, file } = await core.loadGroups();
 				await core.saveGroups(file, removeFromGroup(config, group, id));
 				void vscode.window.showInformationMessage(`Removed ${id} from "${group}". Nothing was uninstalled.`);
@@ -426,10 +483,10 @@ export function registerViews({ core, ui, log }: { core: ViewsCore; ui: PromptUi
 				vscode.commands.executeCommand('better-profiles.syncProfile', { profile: nodeOf(arg, 'profile').name })),
 
 			command('better-profiles.view.setTriggers', (arg?: unknown) =>
-				vscode.commands.executeCommand('better-profiles.setGroupTriggers', { group: nodeOf(arg, 'group').name })),
+				vscode.commands.executeCommand('better-profiles.setGroupTriggers', { group: groupNameOf(arg) })),
 
 			command('better-profiles.view.assignGroup', (arg?: unknown) =>
-				vscode.commands.executeCommand('better-profiles.assignGroup', { group: nodeOf(arg, 'group').name })),
+				vscode.commands.executeCommand('better-profiles.assignGroup', { group: groupNameOf(arg) })),
 		],
 		handles: {
 			groups: { provider: groups as vscode.TreeDataProvider<unknown>, dnd: groupsDnd as vscode.TreeDragAndDropController<unknown>, refresh: () => groups.refresh() },

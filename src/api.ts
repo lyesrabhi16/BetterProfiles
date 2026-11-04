@@ -27,6 +27,8 @@ export interface PromptUi {
 	pickMany(title: string, items: PickItem[], options?: { newItem?: { label: string; prompt: string } }): Promise<string[] | undefined>;
 	/** A typed name. Resolves to the text, or undefined when cancelled. */
 	input(prompt: string): Promise<string | undefined>;
+	/** Opens the page of an extension (the one VS Code shows in the Extensions view). */
+	openExtension(id: string): Promise<void>;
 	/** A modal confirmation. */
 	confirm(message: string, detail: string, action: string): Promise<boolean>;
 }

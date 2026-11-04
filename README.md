@@ -113,6 +113,14 @@ each extension's own folder in VS Code's extensions folder, which holds every pr
 the network. An extension without an image gets the generic extension icon, and one that cannot be found is shown by its id
 (a group marks it "not installed").
 
+**Double-click an extension** (in either tree) to open its page, the one the Extensions view shows. The tree only tells an
+extension about clicks, so two clicks within half a second on the same item count as a double click; if VS Code is set to open
+items on a double click (`workbench.list.openMode`), its own double click is used.
+
+**Right-click** an extension for **Open Extension Page**, **Add to Group**, **Install in Other Profiles**, **Copy Extension Id**
+and, when it is shown inside a group, **Remove From Group** (nothing is uninstalled). Right-click a group, in either tree, for
+**Give To A Profile**, **Set Workspace Triggers** and **Delete Group**; a profile for **Sync Profile With Its Groups**.
+
 Drag and drop works between the two trees and inside them:
 
 | Drag | Onto | Result |

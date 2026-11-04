@@ -29,6 +29,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- Double-clicking an extension in the Better Profiles tab opens its page. Right-clicking an extension offers Open Extension Page,
+  Add to Group, Install in Other Profiles and Copy Extension Id (and Remove From Group inside a group); groups shown inside a
+  profile now have the same right-click menu as in the Groups tree.
 - In the Better Profiles tab, a profile lists the groups it follows first, each with the group's extensions that the profile has
   ("2 of 3 installed"), then the extensions that are in none of those groups.
 - Profiles in the Better Profiles tab show their own icon (the one set in VS Code) when they have a valid one.

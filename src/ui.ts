@@ -44,6 +44,10 @@ export function createUi(): PromptUi {
 			return ids;
 		},
 
+		openExtension: async id => {
+			await vscode.commands.executeCommand('extension.open', id);
+		},
+
 		input: async prompt => vscode.window.showInputBox({ prompt, validateInput: v => (v.trim() ? undefined : 'A name is required.') }),
 
 		confirm: async (message, detail, action) =>

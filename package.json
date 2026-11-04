@@ -105,6 +105,26 @@
       {
         "command": "better-profiles.view.assignGroup",
         "title": "Give To A Profile"
+      },
+      {
+        "command": "better-profiles.view.clickExtension",
+        "title": "Open Extension Page"
+      },
+      {
+        "command": "better-profiles.view.openExtension",
+        "title": "Open Extension Page"
+      },
+      {
+        "command": "better-profiles.view.copyExtensionId",
+        "title": "Copy Extension Id"
+      },
+      {
+        "command": "better-profiles.view.addExtensionToGroup",
+        "title": "Add to Group"
+      },
+      {
+        "command": "better-profiles.view.installExtensionInProfiles",
+        "title": "Install in Other Profiles"
       }
     ],
     "configuration": {
@@ -228,6 +248,26 @@
         {
           "command": "better-profiles.view.assignGroup",
           "when": "false"
+        },
+        {
+          "command": "better-profiles.view.clickExtension",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.openExtension",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.copyExtensionId",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.addExtensionToGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.installExtensionInProfiles",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -277,6 +317,46 @@
           "command": "better-profiles.view.syncProfile",
           "when": "view == betterProfiles.profiles && viewItem == profile",
           "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.openExtension",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "0_open@1"
+        },
+        {
+          "command": "better-profiles.view.addExtensionToGroup",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.installExtensionInProfiles",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "better-profiles.view.copyExtensionId",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "2_copy@1"
+        },
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroupExtension",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.assignGroup",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.setTriggers",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "better-profiles.view.deleteGroup",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "3_delete@1"
         }
       ]
     },
