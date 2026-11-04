@@ -400,6 +400,13 @@ suite('Extension groups against a fake CLI', () => {
 			assert.deepStrictEqual(readState().Default, ['common.one', 'shared.x', 'd.only'], 'other profiles are untouched');
 		});
 
+		test('everything that was ticked goes in one run of the command line', async () => {
+			answer({ pickMany: () => ['extra.a', 'extra.b'], confirm: () => true });
+			const report = await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
+			assert.deepStrictEqual(uninstalls(), [['--uninstall-extension', 'extra.a', '--uninstall-extension', 'extra.b', '--profile', 'Python']]);
+			assert.deepStrictEqual(report.uninstalled?.map(r => [r.id, r.ok]), [['extra.a', true], ['extra.b', true]]);
+		});
+
 		test('declining the confirmation uninstalls nothing', async () => {
 			answer({ pickMany: () => ['extra.a', 'extra.b'], confirm: () => false });
 			await sync({ profile: 'Python', confirm: true, uninstall: 'ask' });
@@ -1966,6 +1973,17 @@ suite('Extension groups against a fake CLI', () => {
 					assert.strictEqual(listsOf('Python'), before, 'no new run of the CLI to show the result');
 					assert.ok(!kids.some(n => n.id === 'a.b' || n.id === 'c.d'), JSON.stringify(kids.map(n => n.id)));
 					assert.ok(kids.some(n => n.id === 'p.installed'));
+				});
+
+				test('a sync that uninstalls extras also drops them from the list the tree has, without listing again', async () => {
+					writeGroups({ groups: { web: ['a.b'] }, profiles: { Python: ['web'] } });
+					writeState({ Default: [], Python: ['a.b', 'extra.z', 'extra.y'], Agents: [] });
+					await children('profiles', profile('Python')); // the tree reads it once
+					await sync({ profile: 'Python', uninstall: ['extra.z', 'extra.y'] });
+					const before = listsOf('Python');
+					const kids = await children('profiles', profile('Python'));
+					assert.strictEqual(listsOf('Python'), before, 'no new run of the CLI to show the result');
+					assert.ok(!kids.some(n => n.id === 'extra.z' || n.id === 'extra.y'), JSON.stringify(kids.map(n => n.id)));
 				});
 
 				test('the tree is told to redraw as a whole afterwards: VS Code ignores a refresh of an item object it does not know', async () => {
