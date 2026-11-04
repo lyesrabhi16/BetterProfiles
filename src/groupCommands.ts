@@ -166,13 +166,8 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return ui.pickOne(title, items);
 	}
 
-	async function pickGroup(config: GroupsConfig, title: string, options: { allowNew?: boolean; holding?: string } = {}): Promise<string | undefined> {
-		const holders = options.holding ? groupsContaining(config, options.holding) : [];
-		const items: PickItem[] = Object.keys(config.groups).map(name => ({
-			id: name,
-			label: name,
-			description: holders.includes(name) ? '$(check) already has it' : `${config.groups[name].length} extensions`,
-		}));
+	async function pickGroup(config: GroupsConfig, title: string, options: { allowNew?: boolean } = {}): Promise<string | undefined> {
+		const items: PickItem[] = Object.keys(config.groups).map(name => ({ id: name, label: name, description: `${config.groups[name].length} extensions` }));
 		return ui.pickOne(title, items, options.allowNew ? { newItem: { label: '$(add) New group', prompt: 'Name of the new group' } } : undefined);
 	}
 
@@ -186,11 +181,14 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 			.then(undefined, error => log.warn(`Follow-up from a notification failed: ${error instanceof Error ? error.message : String(error)}`));
 	}
 
-	/** After a group changed: sync if some profile follows it; if none does, syncing would do nothing, so offer to give it to one. */
-	const nextStepFor = (config: GroupsConfig, group: string): Record<string, () => Thenable<unknown>> =>
-		profilesFollowing(config, group).length > 0
+	/**
+	 * After groups changed: sync if some profile follows any of them; if none does, syncing would do nothing, so offer to
+	 * give them to one. With a single group the profile question already knows which group it is about.
+	 */
+	const nextStepFor = (config: GroupsConfig, groups: string[]): Record<string, () => Thenable<unknown>> =>
+		groups.some(group => profilesFollowing(config, group).length > 0)
 			? { [SYNC_BUTTON]: () => vscode.commands.executeCommand('better-profiles.syncProfile') }
-			: { [GIVE_BUTTON]: () => vscode.commands.executeCommand('better-profiles.assignGroup', { group }) };
+			: { [GIVE_BUTTON]: () => vscode.commands.executeCommand('better-profiles.assignGroup', groups.length === 1 ? { group: groups[0] } : undefined) };
 
 	const withProgress = <T>(title: string, task: () => Promise<T>) =>
 		vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task);
@@ -230,7 +228,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		const next = addToGroup(config, group, extensions);
 		await saveGroups(file, next);
-		offer(`Group "${group.trim()}" now has ${next.groups[group.trim()].length} extensions.`, nextStepFor(next, group.trim()));
+		offer(`Group "${group.trim()}" now has ${next.groups[group.trim()].length} extensions.`, nextStepFor(next, [group.trim()]));
 		return next;
 	};
 
@@ -263,20 +261,40 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	};
 	const optionsOf = <T extends object>(target: unknown): Partial<T> => (typeof target === 'object' && target !== null ? target as Partial<T> : {});
 
+	const quoted = (names: string[]) => names.map(name => `"${name}"`).join(', ');
+
 	const extensionAddToGroup = async (target: unknown): Promise<GroupsConfig | undefined> => {
 		const id = extensionIdOf(target);
 		const { config, file } = await loadGroups();
-		const group = optionsOf<{ group: string }>(target).group ?? await pickGroup(config, `Add ${id} to which group?`, { allowNew: true, holding: id });
-		if (group === undefined) {
+		const named = optionsOf<{ group: string; groups: string[] }>(target);
+		let picked: string[] | undefined = named.groups ?? (named.group === undefined ? undefined : [named.group]);
+		if (picked === undefined) {
+			const holders = groupsContaining(config, id);
+			picked = await ui.pickMany(
+				`Add ${id} to which groups?`,
+				Object.keys(config.groups).map(name => ({
+					id: name,
+					label: name,
+					description: holders.includes(name) ? '$(check) already has it' : `${config.groups[name].length} extensions`,
+				})),
+				{ newItem: { label: '$(add) New group', prompt: 'Name of the new group' } },
+			);
+		}
+		// a name that is not an existing group starts a new one
+		const chosen = [...new Set((picked ?? []).map(name => name.trim()).filter(name => name !== ''))];
+		if (chosen.length === 0) {
 			return undefined;
 		}
-		if (groupsContaining(config, id).includes(group)) {
-			void vscode.window.showInformationMessage(`${id} is already in "${group}".`);
+		const holders = groupsContaining(config, id);
+		const toAdd = chosen.filter(name => !holders.includes(name));
+		const already = chosen.filter(name => holders.includes(name));
+		if (toAdd.length === 0) {
+			void vscode.window.showInformationMessage(`${id} is already in ${quoted(already)}.`);
 			return config;
 		}
-		const next = addToGroup(config, group, [id]);
+		const next = toAdd.reduce((updated, name) => addToGroup(updated, name, [id]), config);
 		await saveGroups(file, next);
-		offer(`Added ${id} to "${group.trim()}".`, nextStepFor(next, group.trim()));
+		offer(`Added ${id} to ${quoted(toAdd)}.${already.length > 0 ? ` It was already in ${quoted(already)}.` : ''}`, nextStepFor(next, toAdd));
 		return next;
 	};
 

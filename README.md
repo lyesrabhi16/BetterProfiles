@@ -104,8 +104,8 @@ they are not in the Command Palette because they need an extension to act on.
 
 | Entry | What it does |
 |---|---|
-| **[Better Profiles] Add to Group** | Pick a group, or type a name to start one, and the extension is added to it. The notification that follows has a button for the next step: **Sync Profile**, or **Give Group To A Profile** if no profile follows the group yet. |
-| **[Better Profiles] Remove from Group** | Tick the groups to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
+| **[Better Profiles] Add to Group** | A checklist of the groups, with nothing ticked: tick one or more (and **New group** to start another) and the extension is added to each. The notification that follows has a button for the next step: **Sync Profile**, or **Give Group To A Profile** if no profile follows the group yet. |
+| **[Better Profiles] Remove from Group** | A checklist of the groups that hold it: tick one or more to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
 | **[Better Profiles] Install in Other Profiles** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
 
 A menu entry's label is fixed text in VS Code, so group names cannot be written into the menu itself; the **Add** list marks the groups that already hold the extension.

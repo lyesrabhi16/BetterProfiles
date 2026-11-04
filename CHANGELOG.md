@@ -21,6 +21,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- `[Better Profiles] Add to Group` is now a multiple-select checklist: tick several groups at once, and **New group** to start another next to
+  them (`[Better Profiles] Remove from Group` already was one). The follow-up button is `Sync Profile` if any of the groups is followed by a
+  profile. The checklists no longer say "uninstall" in their placeholder when they are not about uninstalling.
 - The Extensions view gear menu now shows `[Better Profiles] Remove from Group` only for extensions that are in a group, and the
   `[Better Profiles] Add to Group` list marks the groups that already hold the extension. (A menu label is fixed text, so the
   group names themselves cannot be shown in the menu.)
