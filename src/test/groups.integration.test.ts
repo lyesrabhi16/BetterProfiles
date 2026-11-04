@@ -1020,6 +1020,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		setup(async () => {
 			api = await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+			api.views.profiles.refresh(); // the Profiles tree keeps its lists until refreshed, so every test starts from empty
 			writeState({ Default: ['common.one'], Python: ['p.installed', 'shared.x'], Agents: ['shared.x'] });
 			writeGroups({ groups: { web: ['a.b', 'c.d'], tools: ['x.y'], empty: [] }, profiles: { Python: ['web'], '*': ['tools'] } });
 			answer({});
@@ -1190,6 +1191,22 @@ suite('Extension groups against a fake CLI', () => {
 				await drop('groups', group('web'), nothing);
 				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
 				assert.deepStrictEqual(calls(), []);
+			});
+
+			test('a drop whose items arrive as text still works', async () => {
+				const transfer = new vscode.DataTransfer();
+				transfer.set(PROFILES_MIME, new vscode.DataTransferItem(JSON.stringify([{ kind: 'extension', id: 'p.installed', from: { type: 'profile', name: 'Python' } }])));
+				await drop('groups', group('web'), transfer);
+				assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d', 'p.installed']);
+			});
+
+			test('a drop with garbage in it is ignored without an error', async () => {
+				const before = fs.readFileSync(groupsFile, 'utf8');
+				const transfer = new vscode.DataTransfer();
+				transfer.set(GROUPS_MIME, new vscode.DataTransferItem('not json at all'));
+				transfer.set(PROFILES_MIME, new vscode.DataTransferItem(JSON.stringify([{ kind: 'extension', id: 5 }, { kind: 'group' }, 'x', null])));
+				await drop('groups', group('web'), transfer);
+				assert.strictEqual(fs.readFileSync(groupsFile, 'utf8'), before);
 			});
 
 			test('the trees refresh after a drop', async () => {

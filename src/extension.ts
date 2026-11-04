@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { BetterProfilesApi } from './api';
 import { registerGroupCommands } from './groupCommands';
+import { registerViews } from './views';
 import { createUi } from './ui';
 import {
 	Detection,
@@ -68,11 +69,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		resetPrompts: () => groups.resetPrompts(),
 		groupedExtensions: () => groups.groupedExtensions(),
 		ui,
-		get views(): BetterProfilesApi['views'] { throw new Error('not implemented'); },
+		get views() { return views.handles; },
 		statusBarItem,
 	};
 
 	const groups = registerGroupCommands({ context, log, api, ui });
+	const views = registerViews({ core: { ...groups.core, currentProfileName: async () => (await api.getCurrentProfile())?.name }, ui, log });
 
 	context.subscriptions.push(
 		log,
@@ -93,6 +95,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 		vscode.window.onDidChangeWindowState(state => state.focused && void refresh()),
 		vscode.workspace.onDidChangeConfiguration(event => event.affectsConfiguration('betterProfiles.storageFile') && void refresh()),
 		...groups.disposables,
+		...views.disposables,
 		// editing the groups file by hand: check again when it is saved
 		vscode.workspace.onDidSaveTextDocument(doc => {
 			if (doc.uri.fsPath === groups.groupsFilePath()) {

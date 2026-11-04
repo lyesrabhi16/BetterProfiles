@@ -21,6 +21,10 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Added
 
+- A Better Profiles tab in the Activity Bar with a Groups tree and a Profiles tree, and drag and drop between them: an extension onto
+  a group adds it (a copy), an extension onto a profile installs it there, a group onto a profile gives it. Plus New Group, Delete Group,
+  Remove From Group, Sync Profile With Its Groups, Set Workspace Triggers and Give To A Profile on the trees. Nothing dropped ever
+  uninstalls anything.
 - `[Better Profiles] Add to Group` is now a multiple-select checklist: tick several groups at once, and **New group** to start another next to
   them (`[Better Profiles] Remove from Group` already was one). The follow-up button is `Sync Profile` if any of the groups is followed by a
   profile. The checklists no longer say "uninstall" in their placeholder when they are not about uninstalling.

@@ -72,6 +72,39 @@
       {
         "command": "better-profiles.extensionInstallInProfiles",
         "title": "[Better Profiles] Install in Other Profiles"
+      },
+      {
+        "command": "better-profiles.view.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "better-profiles.view.newGroup",
+        "title": "New Group",
+        "icon": "$(add)"
+      },
+      {
+        "command": "better-profiles.view.deleteGroup",
+        "title": "Delete Group",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "better-profiles.view.removeFromGroup",
+        "title": "Remove From Group",
+        "icon": "$(close)"
+      },
+      {
+        "command": "better-profiles.view.syncProfile",
+        "title": "Sync Profile With Its Groups",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "better-profiles.view.setTriggers",
+        "title": "Set Workspace Triggers"
+      },
+      {
+        "command": "better-profiles.view.assignGroup",
+        "title": "Give To A Profile"
       }
     ],
     "configuration": {
@@ -161,9 +194,113 @@
         {
           "command": "better-profiles.extensionInstallInProfiles",
           "when": "false"
+        },
+        {
+          "command": "better-profiles.view.refresh",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.newGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.deleteGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.syncProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.setTriggers",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.assignGroup",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "better-profiles.view.newGroup",
+          "when": "view == betterProfiles.groups",
+          "group": "navigation@1"
+        },
+        {
+          "command": "better-profiles.view.refresh",
+          "when": "view == betterProfiles.groups || view == betterProfiles.profiles",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "view == betterProfiles.groups && viewItem == groupExtension",
+          "group": "inline"
+        },
+        {
+          "command": "better-profiles.view.syncProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profile",
+          "group": "inline"
+        },
+        {
+          "command": "better-profiles.view.assignGroup",
+          "when": "view == betterProfiles.groups && viewItem == group",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.setTriggers",
+          "when": "view == betterProfiles.groups && viewItem == group",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "better-profiles.view.deleteGroup",
+          "when": "view == betterProfiles.groups && viewItem == group",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "view == betterProfiles.groups && viewItem == groupExtension",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.syncProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profile",
+          "group": "1_modify@1"
         }
       ]
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "better-profiles",
+          "title": "Better Profiles",
+          "icon": "media/better-profiles.svg"
+        }
+      ]
+    },
+    "views": {
+      "better-profiles": [
+        {
+          "id": "betterProfiles.groups",
+          "name": "Groups"
+        },
+        {
+          "id": "betterProfiles.profiles",
+          "name": "Profiles"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "betterProfiles.groups",
+        "contents": "No groups yet. A group is a named set of extensions that you can give to profiles.\n[New Group](command:better-profiles.view.newGroup)"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

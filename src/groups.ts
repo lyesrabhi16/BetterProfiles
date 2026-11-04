@@ -330,6 +330,19 @@ export function groupedExtensionIds(config: GroupsConfig): string[] {
 }
 
 /** Deletes a group, its triggers, and every profile's mention of it. The extensions themselves are untouched. */
-export function removeGroup(_config: GroupsConfig, _group: string): GroupsConfig {
-	throw new Error('not implemented');
+export function removeGroup(config: GroupsConfig, group: string): GroupsConfig {
+	if (!has(config.groups, group)) {
+		throw new Error(`There is no group "${group}".`);
+	}
+	const { [group]: _removed, ...groups } = config.groups;
+	const profiles: Record<string, string[]> = {};
+	for (const [profile, names] of Object.entries(config.profiles)) {
+		const kept = names.filter(name => name !== group);
+		if (kept.length > 0 || names.length === 0) {
+			profiles[profile] = kept;
+		}
+	}
+	const { triggers: oldTriggers, ...rest } = config;
+	const triggers = Object.fromEntries(Object.entries(oldTriggers ?? {}).filter(([name]) => name !== group));
+	return Object.keys(triggers).length > 0 ? { ...rest, groups, profiles, triggers } : { ...rest, groups, profiles };
 }

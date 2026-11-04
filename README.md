@@ -96,6 +96,30 @@ The groups live in one file shared by every profile (VS Code settings are per pr
 Extensions VS Code installs once for all profiles ("application scoped") count as present everywhere, and they
 show up in every column of the comparison.
 
+### The Better Profiles tab
+
+An icon in the Activity Bar opens two trees:
+
+- **Groups**: every group, how many extensions it has and which profiles follow it. Expand one to see its extensions.
+- **Profiles**: Default and every profile, the current one marked. Expanding a profile asks VS Code's command line what it
+  has, once; **Refresh** asks again.
+
+Drag and drop works between the two trees and inside them:
+
+| Drag | Onto | Result |
+|---|---|---|
+| an extension | a group | it is added to that group (a copy: the group it came from keeps it) |
+| an extension | a profile | it is installed into that profile, if the profile does not have it |
+| a group | a profile | the profile follows the group |
+
+**Dropping never removes or uninstalls anything.** The buttons and context menus add **New Group**, **Delete Group**
+(it asks first, and the extensions stay installed), **Remove From Group** (nothing is uninstalled), **Sync Profile With Its
+Groups**, **Set Workspace Triggers** and **Give To A Profile**.
+
+VS Code only lets an extension add views to the Explorer, Run and Debug, Source Control and Test containers, not to its own
+Extensions tab, which is why this has a tab of its own. I found no drag support in the built-in Extensions list, so extensions
+are dragged from the trees here.
+
 ### From an extension's gear menu
 
 In the Extensions view, the gear menu of an installed extension (and its right-click menu) has three more entries, in
@@ -202,6 +226,8 @@ Every command also accepts arguments, so it can be driven without prompts (see `
   remote window it would run on the remote side, where VS Code's local profile records are not available: expect the
   `Profile` label there. Whether `["ui", "workspace"]` would let it run on the local side instead, and so see them, has
   not been tried.
+- Drag and drop is tested with real `DataTransfer` objects handed to the drop handlers, not with a mouse: the virtual display used
+  for testing cannot drive VS Code's own drag and drop either (dragging a file onto a folder in the Explorer failed the same way).
 - The startup timer of the automatic check is not covered by the tests (they call `checkSync()` directly, because a
   timer would race with them). The notification and the checkbox list were checked on screen in a scratch VS Code.
 - Whether a window already open in a profile picks up extensions installed into it by a sync without a reload is

@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { BetterProfilesApi, PickItem, PromptUi } from './api';
+import type { ViewsCore } from './views';
 import {
 	CliInvocation,
 	DEFAULT_PROFILE_NAME,
@@ -62,6 +63,8 @@ export interface GroupFeatures {
 	checkSync(): Promise<void>;
 	resetPrompts(): Promise<void>;
 	groupsFilePath(): string;
+	/** What the Better Profiles tab needs to read and change the groups and to reach the command line. */
+	core: Omit<ViewsCore, 'currentProfileName'>;
 }
 
 const SELF_ID = 'lyesrabhi.better-profiles';
@@ -110,6 +113,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	}
 
 	let grouped: readonly string[] = [];
+	const groupsChanged = new vscode.EventEmitter<void>();
 
 	/**
 	 * A menu entry's label is fixed text, so group names cannot appear in the Extensions view menu. What a menu can do
@@ -129,6 +133,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		await fs.mkdir(path.dirname(file), { recursive: true });
 		await fs.writeFile(file, serializeGroups(config), 'utf8');
 		await refreshGroupedContext();
+		groupsChanged.fire();
 	}
 
 	/** Default plus every profile VS Code has. */
@@ -659,6 +664,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 
 	return {
 		disposables: [
+			groupsChanged,
 			logged('better-profiles.editGroups', editGroups),
 			logged('better-profiles.addToGroup', addToGroupCommand),
 			logged('better-profiles.assignGroup', assignGroupCommand),
@@ -675,5 +681,6 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		groupsFilePath,
 		groupedExtensions: () => grouped,
 		refreshGroupedContext,
+		core: { loadGroups, saveGroups, profileNames, resolveCli: resolveCliOrThrow, run, onDidChangeGroups: groupsChanged.event },
 	};
 }
