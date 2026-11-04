@@ -17,6 +17,7 @@ import {
 	promptKey,
 	profileLayout,
 	assignGroup,
+	unassignGroup,
 	desiredExtensions,
 	emptyGroups,
 	isExtensionId,
@@ -612,5 +613,44 @@ suite('profileLayout', () => {
 	test('no groups at all: everything is among the others', () => {
 		const layout = profileLayout({ groups: {}, profiles: {} }, 'P', ['a.b']);
 		assert.deepStrictEqual(layout, { groups: [], others: ['a.b'] });
+	});
+});
+
+suite('unassignGroup', () => {
+	const c: GroupsConfig = {
+		groups: { web: ['a.b'], tools: ['c.d'] },
+		profiles: { '*': ['tools'], Python: ['web', 'tools'], Rust: ['web'] },
+		triggers: { web: ['**/package.json'] },
+	};
+
+	test('the profile stops following the group, which stays as it was', () => {
+		const next = unassignGroup(c, 'Python', 'web');
+		assert.deepStrictEqual(next.profiles.Python, ['tools']);
+		assert.deepStrictEqual(next.groups, c.groups);
+		assert.deepStrictEqual(next.triggers, c.triggers);
+	});
+
+	test('other profiles keep the group', () => {
+		assert.deepStrictEqual(unassignGroup(c, 'Python', 'web').profiles.Rust, ['web']);
+	});
+
+	test('a profile left with no groups is dropped from the file', () => {
+		assert.ok(!('Rust' in unassignGroup(c, 'Rust', 'web').profiles));
+	});
+
+	test('"*" works like a profile: the group stops going to every profile', () => {
+		const next = unassignGroup(c, ALL_PROFILES, 'tools');
+		assert.ok(!(ALL_PROFILES in next.profiles));
+		assert.deepStrictEqual(next.profiles.Python, ['web', 'tools']);
+	});
+
+	test('leaves the original untouched', () => {
+		unassignGroup(c, 'Python', 'web');
+		assert.deepStrictEqual(c.profiles.Python, ['web', 'tools']);
+	});
+
+	test('a profile that does not follow the group is an error', () => {
+		assert.throws(() => unassignGroup(c, 'Rust', 'tools'), /does not follow/i);
+		assert.throws(() => unassignGroup(c, 'Nobody', 'web'), /does not follow/i);
 	});
 });

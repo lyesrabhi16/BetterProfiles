@@ -1036,7 +1036,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		suite('contributions', () => {
 			const contributes = () => vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON.contributes;
-			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup', 'clickExtension', 'openExtension', 'copyExtensionId', 'addExtensionToGroup', 'installExtensionInProfiles'].map(c => `better-profiles.view.${c}`);
+			const VIEW_COMMANDS = ['refresh', 'newGroup', 'deleteGroup', 'removeFromGroup', 'syncProfile', 'setTriggers', 'assignGroup', 'clickExtension', 'openExtension', 'copyExtensionId', 'addExtensionToGroup', 'installExtensionInProfiles', 'removeFromProfile'].map(c => `better-profiles.view.${c}`);
 
 			test('an activity bar container called Better Profiles with a Groups and a Profiles view', () => {
 				const containers: { id: string; title: string; icon: string }[] = contributes().viewsContainers?.activitybar ?? [];
@@ -1079,13 +1079,30 @@ suite('Extension groups against a fake CLI', () => {
 					assert.ok(menuOf(kind).includes('removeFromGroup'), kind + ' can be removed from its group');
 				}
 				assert.ok(!menuOf('profileExtension').includes('removeFromGroup'), 'an ungrouped extension is in no group of this profile');
-				for (const kind of ['group', 'profileGroup']) {
-					const menu = menuOf(kind);
-					for (const wanted of ['assignGroup', 'setTriggers', 'deleteGroup']) {
-						assert.ok(menu.includes(wanted), `${kind} should offer ${wanted}: ${menu.join(', ')}`);
-					}
+				for (const wanted of ['assignGroup', 'setTriggers', 'deleteGroup']) {
+					assert.ok(menuOf('group').includes(wanted), `group should offer ${wanted}`);
 				}
+				// inside a profile the group is only taken out of that profile: deleting it is for the Groups tree
+				for (const wanted of ['assignGroup', 'setTriggers', 'removeFromProfile']) {
+					assert.ok(menuOf('profileGroup').includes(wanted), `profileGroup should offer ${wanted}: ${menuOf('profileGroup').join(', ')}`);
+				}
+				assert.ok(!menuOf('profileGroup').includes('deleteGroup'), 'a group inside a profile must not offer to delete the group itself');
+				assert.ok(!menuOf('group').includes('removeFromProfile'));
 				assert.ok(menuOf('profile').includes('syncProfile'));
+			});
+
+			test('the quick remove buttons: on an extension of a group, and on a group, in either tree', () => {
+				const entries: { command: string; when: string; group: string }[] = contributes().menus?.['view/item/context'] ?? [];
+				const inline = (command: string) => entries.filter(e => e.group === 'inline' && e.command === 'better-profiles.view.' + command).map(e => e.when).join(' | ');
+				assert.ok(inline('removeFromGroup').includes('viewItem == groupExtension'), 'in the Groups tree');
+				assert.ok(inline('removeFromGroup').includes('viewItem == profileGroupExtension'), 'inside a group of a profile');
+				assert.ok(inline('removeFromProfile').includes('viewItem == profileGroup'), 'on a group of a profile');
+				assert.ok(!inline('removeFromProfile').includes('viewItem == group)'), 'never on the group in the Groups tree');
+				assert.ok(!inline('removeFromGroup').includes('viewItem == profileExtension'), 'an ungrouped extension has no group to leave');
+				const commands: { command: string; icon?: string }[] = contributes().commands;
+				for (const command of ['removeFromGroup', 'removeFromProfile']) {
+					assert.ok(commands.find(c => c.command === 'better-profiles.view.' + command)?.icon, command + ' needs an icon to show as a button');
+				}
 			});
 
 			test('every item kind that a menu names is one that a tree really produces', async () => {
@@ -1678,17 +1695,54 @@ suite('Extension groups against a fake CLI', () => {
 			});
 
 			suite('the right-click commands of a group shown inside a profile', () => {
-				test('Delete Group deletes the group itself, after asking', async () => {
-					answer({ confirm: () => true });
-					await exec('better-profiles.view.deleteGroup', profileGroup('Python', 'web'));
-					assert.strictEqual(seen.confirm.length, 1);
-					assert.ok(!('web' in readGroups().groups));
+				test('Remove From Profile makes the profile stop following the group, and keeps the group and every extension', async () => {
+					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
+					assert.ok(!('Python' in readGroups().profiles), 'Python followed only web');
+					assert.deepStrictEqual(readGroups().groups.web, ['a.b', 'c.d'], 'the group itself is untouched');
+					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x'], 'nothing is uninstalled');
+					assert.deepStrictEqual(calls(), []);
 				});
 
-				test('Delete Group keeps the group when the question is declined', async () => {
-					answer({ confirm: () => false });
-					await exec('better-profiles.view.deleteGroup', profileGroup('Python', 'web'));
+				test('the other profiles that follow the group keep it', async () => {
+					writeGroups({ groups: { web: ['a.b'] }, profiles: { Python: ['web'], Agents: ['web'] } });
+					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
+					assert.deepStrictEqual(readGroups().profiles, { Agents: ['web'] });
+				});
+
+				test('a group the profile follows next to all profiles is taken out of the profile only', async () => {
+					writeGroups({ groups: { web: ['a.b'] }, profiles: { '*': ['web'], Python: ['web'] } });
+					answer({});
+					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
+					assert.deepStrictEqual(readGroups().profiles, { '*': ['web'] });
+				});
+
+				test('a group that goes to all profiles cannot be taken out of one: it says so and offers to remove it from all', async () => {
+					answer({});
+					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'tools'));
+					assert.strictEqual(seen.ask.length, 1);
+					assert.ok(/all profiles/i.test(seen.ask[0].message), seen.ask[0].message);
+					assert.ok(seen.ask[0].buttons.some(b => /all profiles/i.test(b)), seen.ask[0].buttons.join(', '));
+					assert.deepStrictEqual(readGroups().profiles['*'], ['tools'], 'declined: nothing changed');
+				});
+
+				test('accepting the offer stops the group going to every profile', async () => {
+					answer({ ask: (_message, buttons) => buttons[0] });
+					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'tools'));
+					assert.ok(!('*' in readGroups().profiles));
+					assert.deepStrictEqual(readGroups().profiles.Python, ['web'], 'what Python follows by itself is kept');
+					assert.deepStrictEqual(readGroups().groups.tools, ['x.y']);
+				});
+
+				test('Delete Group is not available on a group inside a profile: only on the group in the Groups tree', async () => {
+					answer({ confirm: () => true });
+					await assert.rejects(exec('better-profiles.view.deleteGroup', profileGroup('Python', 'web')), /item of the Better Profiles tab/);
 					assert.ok('web' in readGroups().groups);
+					assert.strictEqual(seen.confirm.length, 0);
+				});
+
+				test('it is refused on anything but a group inside a profile', async () => {
+					await assert.rejects(exec('better-profiles.view.removeFromProfile', group('web')), /item of the Better Profiles tab/);
+					await assert.rejects(exec('better-profiles.view.removeFromProfile', profile('Python')), /item of the Better Profiles tab/);
 				});
 
 				test('Give To A Profile acts on that group', async () => {
