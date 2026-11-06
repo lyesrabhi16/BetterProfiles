@@ -23,7 +23,8 @@ if (!(profile in state)) {
 	process.exit(1);
 } else if (args.includes('--list-extensions')) {
 	wait();
-	console.log(state[profile].map(id => `${id}@1.0.0`).join('\n'));
+	// STUB_GHOSTS: { "<profile>": [ids] } shown by the list of that profile although the CLI then says they are not installed
+	console.log([...state[profile], ...(JSON.parse(process.env.STUB_GHOSTS || '{}')[profile] ?? [])].map(id => `${id}@1.0.0`).join('\n'));
 } else if (args.includes('--install-extension')) {
 	waitForAction();
 	const id = flag('--install-extension');
@@ -42,15 +43,20 @@ if (!(profile in state)) {
 	// STUB_DEPENDANTS: { "<id>": ["<id of an extension that needs it>", ...] }, an extension cannot go while one of those is installed
 	const dependants = JSON.parse(process.env.STUB_DEPENDANTS || '{}');
 	for (const id of all('--uninstall-extension')) {
-		console.log(`Uninstalling ${id}...`);
 		const at = state[profile].findIndex(existing => existing.toLowerCase() === id.toLowerCase());
+		// like the real CLI: "not installed" comes before any progress line for the extension, a refusal comes after it
+		if (at < 0 && !id.startsWith('fail.')) {
+			console.error(`Extension '${id}' is not installed.`);
+			process.exit(1);
+		}
+		console.log(`Uninstalling ${id}...`);
 		const blocker = (dependants[id] ?? []).find(other => state[profile].some(existing => existing.toLowerCase() === other.toLowerCase()));
 		if (blocker) {
 			console.error(`Cannot uninstall '${id}' extension. '${blocker}' extension depends on this.`);
 			process.exit(1);
 		}
-		if (id.startsWith('fail.') || at < 0) {
-			console.error(`Extension '${id}' is not installed.`);
+		if (id.startsWith('fail.')) {
+			console.error(`Cannot uninstall '${id}' extension. It is needed by another extension.`);
 			process.exit(1);
 		}
 		state[profile].splice(at, 1);

@@ -633,7 +633,9 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		store.removing(profile, ids);
 		let results: InstallResult[];
 		try {
-			results = await withProgress(`Uninstalling ${ids.length === 1 ? ids[0] : `${ids.length} extensions`} from "${profile}"…`, () => uninstallExtensions(cli, run, ids, profile));
+			results = await withProgress(`Uninstalling ${ids.length === 1 ? ids[0] : `${ids.length} extensions`} from "${profile}"…`, () => uninstallExtensions(cli, run, ids, profile, {
+				onRun: ({ ids: asked, code, stdout, stderr }) => log.info(`uninstall ${asked.length} from ${profile}: exit ${code}. ${[stdout, stderr].map(text => text.trim().split(/\r?\n/).slice(-4).join(' | ')).filter(Boolean).join(' || ')}`),
+			}));
 		} catch (error) {
 			store.settle(profile, ids);
 			throw error;
@@ -643,6 +645,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		}
 		store.removed(profile, results.filter(r => r.ok).map(r => r.id));
 		store.settle(profile, results.filter(r => !r.ok).map(r => r.id));
+		void store.reload(profile); // what is really there, read quietly: the tree shows the truth whatever the command line said
 		return results;
 	}
 

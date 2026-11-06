@@ -249,11 +249,11 @@ suite('uninstallExtensions (many in one run of the CLI)', () => {
 	});
 
 	test('when it fails, the ones it says went are told apart from the others', async () => {
-		const { run } = fakeRunner({ code: 1, stdout: lines('a.b'), stderr: "Extension 'c.d' is not installed.\nMake sure you use the full extension ID\n" });
+		const { run } = fakeRunner({ code: 1, stdout: lines('a.b'), stderr: "Cannot uninstall 'c.d' extension. 'x.y' extension depends on this.\n" });
 		const [first, second] = await uninstallExtensions(cli, run, ['a.b', 'c.d']);
 		assert.strictEqual(first.ok, true);
 		assert.strictEqual(second.ok, false);
-		assert.ok(second.message.includes('c.d') && second.message.includes('not installed'), second.message);
+		assert.ok(second.message.includes('c.d') && second.message.includes('depends on this'), second.message);
 	});
 
 	test('an id is recognised in its output whatever the case', async () => {
@@ -459,14 +459,25 @@ suite('uninstallExtensions when the CLI says an extension is not installed', () 
 		// built-in notices and the like come before the progress line
 		const run: Runner = async (_c, args) => {
 			const ids = args.flatMap((arg, i) => (arg === '--uninstall-extension' ? [args[i + 1]] : []));
-			if (ids[0] === 'odd.one') {
-				return { code: 1, stdout: '', stderr: 'Something odd about odd.one\n' };
+			let stdout = '';
+			for (const id of ids) {
+				if (id === 'odd.one') {
+					return { code: 1, stdout, stderr: 'Something odd about odd.one\n' };
+				}
+				stdout += `Uninstalling ${id}...\nExtension '${id}' was successfully uninstalled!\n`;
 			}
-			return { code: 0, stdout: ids.map(id => `Uninstalling ${id}...\nExtension '${id}' was successfully uninstalled!\n`).join(''), stderr: '' };
+			return { code: 0, stdout, stderr: '' };
 		};
-		const results = await uninstallExtensions(cli, run, ['odd.one', 'a.b', 'c.d']);
-		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['odd.one', false], ['a.b', true], ['c.d', true]]);
-		assert.ok(results[0].message.includes('odd.one'), results[0].message);
+		const results = await uninstallExtensions(cli, run, ['a.b', 'odd.one', 'c.d']);
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['a.b', true], ['odd.one', false], ['c.d', true]]);
+		assert.ok(results[1].message.includes('odd.one'), results[1].message);
+	});
+
+	test('each extension that went is reported with its own success line, not the last line of the run', async () => {
+		const sim = strictCli(['a.b', 'c.d']);
+		const [first, second] = await uninstallExtensions(cli, sim.run, ['a.b', 'c.d']);
+		assert.ok(first.message.includes('a.b') && !first.message.includes('c.d'), first.message);
+		assert.ok(second.message.includes('c.d'), second.message);
 	});
 
 	test('each run of the command line can be seen, for the log', async () => {

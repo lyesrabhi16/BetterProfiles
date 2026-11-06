@@ -21,6 +21,12 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- A removal could report dozens of extensions as failed with "Extension 'x' is not installed" (one id, the same message on every line)
+  when the first extension it asked for was not installed any more. VS Code's command line checks each extension right before it
+  uninstalls it and stops with that error, before printing any progress line, so the extension could not be told which one it had
+  stopped at and gave up on all the rest. An extension that is not installed is now treated as done, the rest goes on, and a failure
+  after some went is attributed to the next extension in the list. Every run of the command line is now written to the log (exit code
+  and its last lines), and the profile is read again quietly afterwards so the tree shows what is really installed.
 - The message "Kept x: this extension, what keepExtensions lists and what every profile has is never uninstalled." listed every possible
   reason and never said which one applied, nor what to do. It now says the reason for each extension ("VS Code applies it to all
   profiles, so removing it here would remove it from every profile. To remove it from just this profile, turn off Apply Extension to all

@@ -184,7 +184,13 @@ const PROGRESS = /^Uninstalling\s/i;
  * again: they go, and that one then often goes too (what needed it is gone). One that fails even when it comes last is
  * reported, with the CLI's own reason, and the rest still go.
  */
-export async function uninstallExtensions(cli: CliInvocation, runner: Runner, ids: string[], profile?: string): Promise<InstallResult[]> {
+export async function uninstallExtensions(
+	cli: CliInvocation,
+	runner: Runner,
+	ids: string[],
+	profile?: string,
+	options: { /** Told about every run of the CLI, to be logged. */ onRun?: (run: { ids: string[]; code: number; stdout: string; stderr: string }) => void } = {},
+): Promise<InstallResult[]> {
 	const invalid = (id: string): InstallResult => ({ id, ok: false, message: `"${id}" is not a valid extension id (expected publisher.name).` });
 	const key = (id: string) => id.toLowerCase();
 	const valid = [...new Map(ids.filter(isExtensionId).map(id => [key(id), id])).values()];
@@ -193,6 +199,8 @@ export async function uninstallExtensions(cli: CliInvocation, runner: Runner, id
 	}
 	const results = new Map<string, InstallResult>();
 	const succeed = (id: string, message: string) => { results.set(key(id), { id, ok: true, message }); };
+	/** The line that says this extension went, else the last line of the run. */
+	const wentLine = (stdout: string, id: string) => stdout.split(/\r?\n/).map(l => l.trim()).find(l => /was successfully uninstalled/i.test(l) && key(l).includes(`'${key(id)}'`)) ?? lastLine(stdout);
 	const fail = (id: string, message: string) => { results.set(key(id), { id, ok: false, message }); };
 	const reasonOf = (result: RunResult, id?: string): string => {
 		const lines = `${result.stderr}\n${result.stdout}`.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '' && !PROGRESS.test(l) && !/was successfully uninstalled/i.test(l));
@@ -211,18 +219,30 @@ export async function uninstallExtensions(cli: CliInvocation, runner: Runner, id
 			remaining = [];
 			break;
 		}
+		options.onRun?.({ ids: [...remaining], code: result.code, stdout: result.stdout, stderr: result.stderr });
 		if (result.code === 0) {
-			remaining.forEach(id => succeed(id, lastLine(result.stdout)));
+			remaining.forEach(id => succeed(id, wentLine(result.stdout, id)));
 			remaining = [];
 			break;
 		}
 		const went = new Set([...result.stdout.matchAll(/Extension '([^']+)' was successfully uninstalled/gi)].map(m => key(m[1])));
-		remaining.filter(id => went.has(key(id))).forEach(id => succeed(id, lastLine(result.stdout)));
+		remaining.filter(id => went.has(key(id))).forEach(id => succeed(id, wentLine(result.stdout, id)));
 		const left = remaining.filter(id => !went.has(key(id)));
 
-		// the CLI names the extension it was at in its last "Uninstalling x..." line
+		// The CLI checks that an extension is installed right before it uninstalls it, and says if it is not (before any
+		// progress line for it). Not installed is what was asked for: it is done, and the others go on.
+		const absent = left.find(id => key(id) === key(/Extension '([^']+)' is not installed/i.exec(result.stderr)?.[1] ?? ''));
+		if (absent !== undefined) {
+			succeed(absent, `${absent} was not installed.`);
+			remaining = left.filter(id => id !== absent);
+			continue;
+		}
+
+		// The CLI names the extension it was at in its last "Uninstalling x..." line. Without one, it failed right after
+		// the ones that went, so it was at the next one. With nothing done and nothing said it failed as a whole.
 		const attempted = [...result.stdout.matchAll(/^Uninstalling (\S+?)\.\.\./gm)].map(m => key(m[1]));
-		const stoppedAt = left.find(id => key(id) === attempted[attempted.length - 1]);
+		const unfinished = left.find(id => key(id) === attempted[attempted.length - 1]);
+		const stoppedAt = unfinished ?? (went.size > 0 ? left[0] : undefined);
 		if (stoppedAt === undefined) {
 			left.forEach(id => fail(id, reasonOf(result, id))); // it failed without saying where: nothing to retry
 			remaining = [];

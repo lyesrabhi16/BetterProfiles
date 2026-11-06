@@ -2453,6 +2453,21 @@ suite('Extension groups against a fake CLI', () => {
 					}
 				});
 
+				test('an extension the list shows but the command line says is not installed does not fail the others', async () => {
+					process.env.STUB_GHOSTS = JSON.stringify({ Python: ['ghost.one', 'ghost.two'] });
+					try {
+						writeGroups({ groups: { java: ['ghost.one', 'a.b', 'ghost.two', 'c.d'] }, profiles: { Python: ['java'] } });
+						writeState({ Default: [], Python: ['a.b', 'c.d', 'p.installed'], Agents: [] });
+						answer({ confirm: () => true });
+						const report = await removeGroup('java');
+						assert.deepStrictEqual(report.failed, [], 'not installed is what was asked for');
+						assert.deepStrictEqual(report.uninstalled.sort(), ['a.b', 'c.d', 'ghost.one', 'ghost.two']);
+						assert.deepStrictEqual(readState().Python, ['p.installed']);
+					} finally {
+						delete process.env.STUB_GHOSTS;
+					}
+				});
+
 				test('what really cannot go is reported with the reason, and the extensions around it still go', async () => {
 					process.env.STUB_DEPENDANTS = JSON.stringify({ 'lang.base': ['outside.user'] });
 					try {
