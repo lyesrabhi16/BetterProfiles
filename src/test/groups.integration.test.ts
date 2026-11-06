@@ -1632,6 +1632,19 @@ suite('Extension groups against a fake CLI', () => {
 					assert.strictEqual(listCalls(), 0);
 				});
 
+				test('only what VS Code applies to all profiles is protected: one that merely is in every profile can be removed from one', async () => {
+					writeIndex(defaultIndex(), [entry('common.one'), entry('app.wide', { isApplicationScoped: true }), entry('everywhere.x')]);
+					writeIndex(profileIndex('p1'), [entry('p.installed'), entry('everywhere.x')]);
+					writeIndex(profileIndex('a1'), [entry('everywhere.x')]);
+					writeState({ Default: ['common.one', 'app.wide', 'everywhere.x'], Python: ['p.installed', 'everywhere.x', 'app.wide'], Agents: ['everywhere.x'] });
+					answer({ confirm: () => true });
+					const report = await exec<{ uninstalled: string[]; kept: string[]; reasons: Record<string, string> }>('better-profiles.removeExtensionFromProfile', { profile: 'Python', ids: ['everywhere.x', 'app.wide'] });
+					assert.deepStrictEqual(report.uninstalled, ['everywhere.x']);
+					assert.deepStrictEqual(report.kept, ['app.wide']);
+					assert.deepStrictEqual(report.reasons, { 'app.wide': 'application' });
+					assert.strictEqual(listCalls(), 0, 'the flag is in the files: no other profile needs to be looked at');
+				});
+
 				test('the question before an uninstall is asked at once, with no run of the command line first', async () => {
 					process.env.STUB_DELAY_MS = '1500'; // a command line list would take this long
 					writeGroups({ groups: { web: ['p.installed', 'x.other'] }, profiles: { Python: ['web'] } });
@@ -2261,7 +2274,7 @@ suite('Extension groups against a fake CLI', () => {
 			});
 
 			suite('Remove From Profile on a group also uninstalls its extensions from that profile', () => {
-				type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
+				type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean; reasons: Record<string, string> };
 				const removeGroup = (group = 'web', profileName = 'Python') => exec<Report>('better-profiles.view.removeFromProfile', profileGroup(profileName, group));
 
 				setup(() => writeState({ Default: ['common.one'], Python: ['a.b', 'c.d', 'p.installed', 'shared.x'], Agents: ['shared.x'] }));
@@ -2315,6 +2328,7 @@ suite('Extension groups against a fake CLI', () => {
 					const report = await removeGroup();
 					assert.deepStrictEqual(report.uninstalled, ['c.d']);
 					assert.deepStrictEqual(report.kept, ['lyesrabhi.better-profiles']);
+					assert.deepStrictEqual(report.reasons, { 'lyesrabhi.better-profiles': 'self' });
 					assert.ok(readState().Python.includes('lyesrabhi.better-profiles'));
 				});
 
@@ -2324,6 +2338,7 @@ suite('Extension groups against a fake CLI', () => {
 					const report = await removeGroup();
 					assert.deepStrictEqual(report.uninstalled, ['a.b']);
 					assert.deepStrictEqual(report.kept, ['c.d']);
+					assert.deepStrictEqual(report.reasons, { 'c.d': 'keep' });
 				});
 
 				test('what is installed in every profile stays: VS Code installs those for all profiles at once', async () => {
@@ -2332,7 +2347,8 @@ suite('Extension groups against a fake CLI', () => {
 					const report = await removeGroup();
 					assert.deepStrictEqual(report.uninstalled, ['c.d']);
 					assert.deepStrictEqual(report.kept, ['a.b']);
-					assert.ok(seen.confirm[0].detail.includes('a.b'), 'the question should say it is kept');
+					assert.deepStrictEqual(report.reasons, { 'a.b': 'everywhere' });
+					assert.ok(seen.confirm[0].detail.includes('a.b (installed in every profile)'), 'the question should say why it stays: ' + seen.confirm[0].detail);
 				});
 
 				test('one that cannot be uninstalled is reported and the others still go', async () => {

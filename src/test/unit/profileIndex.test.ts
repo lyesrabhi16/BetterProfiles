@@ -78,7 +78,16 @@ suite('listFromIndexes', () => {
 	});
 
 	test('what is returned has the form of the command line list: an id and a version', () => {
-		assert.deepStrictEqual(listFromIndexes(own, undefined), [{ id: 'a.b', version: '1.0.0', folder: 'a.b-1.0.0' }]);
+		assert.deepStrictEqual(listFromIndexes(own, undefined), [{ id: 'a.b', version: '1.0.0', folder: 'a.b-1.0.0', applicationScoped: false }]);
+	});
+});
+
+suite('listFromIndexes and "applied to all profiles"', () => {
+	test('what VS Code applies to all profiles is marked in every list it appears in', () => {
+		const flagged = parseProfileIndex(JSON.stringify([entry('app.wide', '5.0.0', {}, { isApplicationScoped: true }), entry('d.one', '1.0.0')]));
+		const named = parseProfileIndex(JSON.stringify([entry('a.b', '1.0.0')]));
+		assert.deepStrictEqual(listFromIndexes(flagged, undefined).map(e => [e.id, e.applicationScoped]), [['app.wide', true], ['d.one', false]]);
+		assert.deepStrictEqual(listFromIndexes(named, flagged).map(e => [e.id, e.applicationScoped]), [['a.b', false], ['app.wide', true]]);
 	});
 });
 
