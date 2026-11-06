@@ -37,6 +37,8 @@ export interface InstalledExtension {
 	version?: string;
 	/** Its folder in the extensions folder, when the source of the list says (the command line does not). */
 	folder?: string;
+	/** VS Code applies it to all profiles (one copy for every profile). Known from VS Code's files, not from the command line. */
+	applicationScoped?: boolean;
 }
 
 export interface InstallResult {

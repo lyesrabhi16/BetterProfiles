@@ -21,6 +21,7 @@ import {
 	userDataDirFromStorageFile,
 } from './cli';
 import { IndexEntry, indexPath, listFromIndexes } from './profileIndex';
+import { KeptReason, keptDetail, keptSentence } from './removalText';
 import { ProfileIndexReader } from './profileIndexReader';
 import { ProfileStore } from './profileStore';
 import {
@@ -67,12 +68,14 @@ type UninstallMode = 'none' | 'ask' | string[];
 export interface RemovalReport {
 	/** Taken out of the profile. */
 	uninstalled: string[];
-	/** Left installed on purpose: this extension, what keepExtensions lists, what every profile has. */
+	/** Left installed on purpose: this extension, what keepExtensions lists, what VS Code applies to all profiles. */
 	kept: string[];
 	/** The command line could not uninstall them. */
 	failed: string[];
 	/** The user declined the question, and nothing was changed. */
 	cancelled: boolean;
+	/** Why each one in `kept` stays. */
+	reasons: Record<string, KeptReason>;
 }
 
 export interface GroupFeatures {
@@ -579,32 +582,43 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		return new Map(names.map((name, i) => [name, lists[i]]));
 	}
 
-	/** What must never be uninstalled from one profile, whatever asked for it. */
-	const protectedFromRemoval = (lists: Map<string, string[]>): string[] => [
-		// installed once for every profile ("application scoped"): removing it from one removes it from all
-		...commonToAllProfiles([...lists.values()]),
-		SELF_ID,
-		...(settings().get<string[]>('keepExtensions') ?? []),
-	];
+	/**
+	 * Why each extension must never be uninstalled from just one profile (by lower-case id): this one, what the user listed,
+	 * and what VS Code applies to all profiles (one copy for every profile, so "from this profile" would mean from all).
+	 * VS Code's files say which those are; with only the command line's lists the best guess is what every profile has.
+	 */
+	async function protectionOf(profile: string, own: InstalledExtension[], known?: Map<string, string[]>): Promise<Map<string, KeptReason>> {
+		const reasons = new Map<string, KeptReason>();
+		if (own.length > 0 && own.every(e => e.applicationScoped !== undefined)) {
+			own.filter(e => e.applicationScoped).forEach(e => reasons.set(lower(e.id), 'application'));
+		} else if (own.length > 0) {
+			commonToAllProfiles([...(await everyProfile(known)).values()]).forEach(id => reasons.set(id, 'everywhere'));
+		}
+		(settings().get<string[]>('keepExtensions') ?? []).forEach(id => reasons.set(lower(id), 'keep'));
+		reasons.set(lower(SELF_ID), 'self');
+		return reasons;
+	}
 
 	/** Everything the profile has that its groups do not, minus what must never be offered for removal. */
 	async function findExtras(profile: string, config: GroupsConfig): Promise<string[]> {
-		const lists = await looking(`Looking at what "${profile}" has…`, () => everyProfile());
-		return planCleanup(config, profile, lists.get(profile) ?? [], protectedFromRemoval(lists)).extras;
+		const own = await looking(`Looking at what "${profile}" has…`, () => store.list(profile, { maxAgeMs: 0 }));
+		const protectedIds = [...(await looking(`Looking at what "${profile}" has…`, () => protectionOf(profile, own))).keys()];
+		return planCleanup(config, profile, own.map(e => e.id), protectedIds).extras;
 	}
 
-	/** Which of these the profile has, split into what can go and what must stay. */
-	async function planRemoval(profile: string, ids: string[]): Promise<{ remove: string[]; kept: string[] }> {
+	/** Which of these the profile has, split into what can go and what must stay (with why). */
+	async function planRemoval(profile: string, ids: string[]): Promise<{ remove: string[]; kept: string[]; why: Record<string, KeptReason> }> {
 		return looking(`Looking at what "${profile}" has…`, async () => {
 			// the profile first: when it has none of them there is nothing to protect, and the others need not be read
-			const own = (await store.list(profile, { maxAgeMs: 0 })).map(e => e.id);
-			const have = new Map(own.map(id => [lower(id), id]));
+			const own = await store.list(profile, { maxAgeMs: 0 });
+			const have = new Map(own.map(e => [lower(e.id), e.id]));
 			const here = [...new Set(ids.map(lower))].flatMap(id => have.get(id) ?? []);
 			if (here.length === 0) {
-				return { remove: [], kept: [] };
+				return { remove: [], kept: [], why: {} };
 			}
-			const protectedIds = new Set(protectedFromRemoval(await everyProfile(new Map([[profile, own]]))).map(lower));
-			return { remove: here.filter(id => !protectedIds.has(lower(id))), kept: here.filter(id => protectedIds.has(lower(id))) };
+			const reasons = await protectionOf(profile, own, new Map([[profile, own.map(e => e.id)]]));
+			const kept = here.filter(id => reasons.has(lower(id)));
+			return { remove: here.filter(id => !reasons.has(lower(id))), kept, why: Object.fromEntries(kept.map(id => [id, reasons.get(lower(id))!])) };
 		});
 	}
 
@@ -643,7 +657,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 	const reported = (profile: string, report: RemovalReport): void => {
 		const parts = [
 			report.uninstalled.length > 0 ? `Uninstalled ${report.uninstalled.join(', ')} from "${profile}".` : '',
-			report.kept.length > 0 ? `Kept ${report.kept.join(', ')}: this extension, what keepExtensions lists and what every profile has is never uninstalled.` : '',
+			keptSentence(report.reasons),
 		].filter(Boolean);
 		if (report.failed.length > 0) {
 			void vscode.window.showWarningMessage(`Could not uninstall ${report.failed.join(', ')} from "${profile}". ${parts.join(' ')}`, 'Show Log').then(choice => choice && log.show());
@@ -666,12 +680,12 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		const cli = resolveCliOrThrow();
 		const members = [...new Set(removed.flatMap(group => config.groups[group] ?? []))];
 		const plan = await planRemoval(profile, members.filter(id => !stillWanted.has(lower(id)) && !excluded.has(lower(id))));
-		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
+		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false, reasons: plan.why };
 		const names = removed.map(group => `"${group}"`).join(', ');
 
 		if (plan.remove.length > 0 && args?.confirm !== false && !await ui.confirm(
 			`Remove ${removed.length === 1 ? names : `${removed.length} groups`} from "${profile}" and uninstall ${plan.remove.length} extension${plan.remove.length === 1 ? '' : 's'} from it?`,
-			`${removed.length > 1 ? `Groups: ${names}\n\n` : ''}${plan.remove.join('\n')}\n\nThey are uninstalled from "${profile}" only. The group${removed.length === 1 ? '' : 's'} and the other profiles are not changed.${plan.kept.length > 0 ? `\n\nStays installed: ${plan.kept.join(', ')}.` : ''}`,
+			`${removed.length > 1 ? `Groups: ${names}\n\n` : ''}${plan.remove.join('\n')}\n\nThey are uninstalled from "${profile}" only. The group${removed.length === 1 ? '' : 's'} and the other profiles are not changed.${plan.kept.length > 0 ? `\n\nStays installed: ${keptDetail(plan.why)}.` : ''}`,
 			'Remove and Uninstall',
 		)) {
 			report.cancelled = true;
@@ -704,7 +718,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 		const desired = new Set(desiredExtensions(config, profile).ids.map(lower));
 		const cli = resolveCliOrThrow();
 		const plan = await planRemoval(profile, ids);
-		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false };
+		const report: RemovalReport = { uninstalled: [], kept: plan.kept, failed: [], cancelled: false, reasons: plan.why };
 		const present = new Set([...plan.remove, ...plan.kept].map(lower));
 		const exclude = async (which: string[]) => {
 			const loaded = await loadGroups();
@@ -729,7 +743,7 @@ export function registerGroupCommands({ context, log, api, ui, run = defaultRunn
 				? (wanted.length === 1
 					? `It stays in its group, and the other profiles keep it. "${profile}" will no longer ask for it.`
 					: `Those that a group has stay in their groups, and the other profiles keep them. "${profile}" will no longer ask for them.`)
-				: `None of the groups of "${profile}" has ${plan.remove.length === 1 ? 'it' : 'them'}. ${plan.remove.length === 1 ? 'It is' : 'They are'} uninstalled from this profile only.`}${plan.kept.length > 0 ? `\n\nStays installed: ${plan.kept.join(', ')}.` : ''}`,
+				: `None of the groups of "${profile}" has ${plan.remove.length === 1 ? 'it' : 'them'}. ${plan.remove.length === 1 ? 'It is' : 'They are'} uninstalled from this profile only.`}${plan.kept.length > 0 ? `\n\nStays installed: ${keptDetail(plan.why)}.` : ''}`,
 			'Uninstall',
 		)) {
 			report.cancelled = true;

@@ -91,6 +91,20 @@ suite('listFromIndexes and "applied to all profiles"', () => {
 	});
 });
 
+suite('an extension both lists, one of them saying VS Code applies it to all profiles', () => {
+	test('it counts as applied to all profiles, whichever file says it, with the profile\'s own version', () => {
+		const own = parseProfileIndex(JSON.stringify([entry('app.wide', '6.0.0')]));
+		const defaults = parseProfileIndex(JSON.stringify([entry('app.wide', '5.0.0', {}, { isApplicationScoped: true })]));
+		assert.deepStrictEqual(listFromIndexes(own, defaults).map(e => [e.id, e.version, e.applicationScoped]), [['app.wide', '6.0.0', true]]);
+	});
+
+	test('one the default profile lists without the flag does not make the profile\'s copy applied to all', () => {
+		const own = parseProfileIndex(JSON.stringify([entry('a.b', '1.0.0')]));
+		const defaults = parseProfileIndex(JSON.stringify([entry('a.b', '1.0.0')]));
+		assert.deepStrictEqual(listFromIndexes(own, defaults).map(e => e.applicationScoped), [false]);
+	});
+});
+
 suite('indexPath', () => {
 	const base = { extensionsDir: '/home/u/.vscode/extensions', userDataDir: '/home/u/.config/Code', defaultName: 'Default' };
 

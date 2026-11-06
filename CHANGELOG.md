@@ -21,6 +21,13 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- The message "Kept x: this extension, what keepExtensions lists and what every profile has is never uninstalled." listed every possible
+  reason and never said which one applied, nor what to do. It now says the reason for each extension ("VS Code applies it to all
+  profiles, so removing it here would remove it from every profile. To remove it from just this profile, turn off Apply Extension to all
+  Profiles for it in the Extensions view first."), and the question before the uninstall says it too.
+- Only what VS Code marks as applied to all profiles is protected from a per-profile removal when its files can be read. An extension that
+  merely happens to be installed in every profile can be removed from one (it was kept before). The command line's lists, which cannot
+  tell the two apart, still use the old guess.
 - Removing several extensions from a profile failed as a whole when one of them could not be uninstalled: VS Code's command line stops at
   the first extension it cannot remove (for example Java language support, which the Java test runner needs) and does not try the
   rest, and every extension was reported with that one error (or with its "Uninstalling x..." progress line). The extension it stopped

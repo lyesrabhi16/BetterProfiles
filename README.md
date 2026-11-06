@@ -141,8 +141,12 @@ In the Groups tree it also has **Remove From Group** (it only edits the groups f
   stay as they are. A group that goes to all profiles cannot leave just one: it offers to remove it from all profiles, without
   uninstalling anything.
 
-These never uninstall this extension, anything listed in `betterProfiles.keepExtensions`, or anything installed in every profile (VS Code
-installs those once for all of them). Anything else the command line cannot remove is reported. Deleting a profile can only be done
+These never uninstall this extension, anything listed in `betterProfiles.keepExtensions`, or anything VS Code **applies to all profiles**
+(the Extensions view's "Apply Extension to all Profiles": there is one copy for every profile, so removing it "from this profile" would
+remove it from all of them). Each one that is kept is named with its own reason in the question and in the message afterwards; to remove
+an extension from just one profile, turn that setting off for it in the Extensions view first. VS Code's files say which extensions are
+applied to all profiles; when only the command line's lists are available, an extension installed in every profile is assumed to be.
+Anything else the command line cannot remove is reported. Deleting a profile can only be done
 through VS Code's own screens (its Delete Profile command takes no arguments). A new, empty profile can be made by opening a window
 with `code --profile NAME`, but deleting and rebuilding a profile would lose its settings, keybindings and snippets, so this
 extension does not do it.

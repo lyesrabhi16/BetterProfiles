@@ -53,8 +53,11 @@ export function parseProfileIndex(text: string): IndexEntry[] {
  */
 export function listFromIndexes(own: IndexEntry[], defaults: IndexEntry[] | undefined): InstalledExtension[] {
 	const seen = new Set(own.map(e => e.id.toLowerCase()));
+	const sharedIds = new Set((defaults ?? []).filter(e => e.applicationScoped).map(e => e.id.toLowerCase()));
 	const shared = (defaults ?? []).filter(e => e.applicationScoped && !seen.has(e.id.toLowerCase()));
-	return [...own, ...shared].map(({ id, version, folder }) => ({ id, ...(version === undefined ? {} : { version }), ...(folder === undefined ? {} : { folder }) }));
+	// the default profile saying "applied to all profiles" settles it, even when the profile has a copy of its own too
+	const marked = own.map(e => (sharedIds.has(e.id.toLowerCase()) ? { ...e, applicationScoped: true } : e));
+	return [...marked, ...shared].map(({ id, version, folder, applicationScoped }) => ({ id, ...(version === undefined ? {} : { version }), ...(folder === undefined ? {} : { folder }), applicationScoped }));
 }
 
 export interface IndexLocation {
