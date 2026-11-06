@@ -388,3 +388,95 @@ suite('uninstallExtensions when the CLI stops at the first extension it cannot r
 		assert.ok(results.every(r => !r.ok && r.message === 'Profile not found.'));
 	});
 });
+
+/**
+ * The real CLI checks that each extension is installed right before it does it, and THROWS if it is not, before it prints
+ * any progress line for it (extensionManagementCLI.ts). One after the other, so the ones before it have been done.
+ */
+function strictCli(installed: string[], dependants: Record<string, string[]> = {}) {
+	const have = new Set(installed.map(id => id.toLowerCase()));
+	const launches: string[][] = [];
+	const run: Runner = async (_command, args) => {
+		const ids = args.flatMap((arg, i) => (arg === '--uninstall-extension' ? [args[i + 1]] : []));
+		launches.push(ids);
+		let stdout = '';
+		for (const id of ids) {
+			if (!have.has(id.toLowerCase())) {
+				return { code: 1, stdout, stderr: `Extension '${id}' is not installed.\nMake sure you use the full extension ID, including the publisher, e.g.: ms-dotnettools.csharp\n` };
+			}
+			stdout += `Uninstalling ${id}...\n`;
+			const blocker = (dependants[id.toLowerCase()] ?? []).find(other => have.has(other.toLowerCase()));
+			if (blocker) {
+				return { code: 1, stdout, stderr: `Cannot uninstall '${id}' extension. '${blocker}' extension depends on this.\n` };
+			}
+			have.delete(id.toLowerCase());
+			stdout += `Extension '${id}' was successfully uninstalled!\n`;
+		}
+		return { code: 0, stdout, stderr: '' };
+	};
+	return { run, launches, left: () => [...have].sort() };
+}
+
+suite('uninstallExtensions when the CLI says an extension is not installed', () => {
+	test('an extension that is not installed counts as done, and the others still go (it is first)', async () => {
+		const sim = strictCli(['a.b', 'c.d']);
+		const results = await uninstallExtensions(cli, sim.run, ['ghost.one', 'a.b', 'c.d']);
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['ghost.one', true], ['a.b', true], ['c.d', true]]);
+		assert.deepStrictEqual(sim.left(), []);
+		assert.strictEqual(sim.launches.length, 2, 'the first run stops at the ghost, the second does the rest');
+		assert.deepStrictEqual(sim.launches[1], ['a.b', 'c.d']);
+	});
+
+	test('so do the ones before and after it in the middle of the list', async () => {
+		const sim = strictCli(['a.b', 'c.d']);
+		const results = await uninstallExtensions(cli, sim.run, ['a.b', 'ghost.one', 'c.d']);
+		assert.ok(results.every(r => r.ok));
+		assert.deepStrictEqual(sim.left(), []);
+	});
+
+	test('a long list whose first extension is not installed (as in a real report) still removes the rest', async () => {
+		const ids = Array.from({ length: 35 }, (_, i) => `pub.ext${i}`);
+		const sim = strictCli(ids.slice(1)); // the first one is not installed
+		const results = await uninstallExtensions(cli, sim.run, ids);
+		assert.ok(results.every(r => r.ok), results.filter(r => !r.ok).map(r => r.message).join(' | '));
+		assert.deepStrictEqual(sim.left(), []);
+		assert.strictEqual(sim.launches.length, 2);
+	});
+
+	test('it says that it was not installed, so that nothing claims it just uninstalled it', async () => {
+		const sim = strictCli(['a.b']);
+		const [ghost] = await uninstallExtensions(cli, sim.run, ['ghost.one', 'a.b']);
+		assert.ok(/not installed/i.test(ghost.message), ghost.message);
+	});
+
+	test('ids are compared without regard to case', async () => {
+		const sim = strictCli(['a.b']);
+		const results = await uninstallExtensions(cli, sim.run, ['GHOST.One', 'a.b']);
+		assert.ok(results.every(r => r.ok));
+	});
+
+	test('when it fails after some went, without a progress line for the one it failed at, that one is the next in the list', async () => {
+		// built-in notices and the like come before the progress line
+		const run: Runner = async (_c, args) => {
+			const ids = args.flatMap((arg, i) => (arg === '--uninstall-extension' ? [args[i + 1]] : []));
+			if (ids[0] === 'odd.one') {
+				return { code: 1, stdout: '', stderr: 'Something odd about odd.one\n' };
+			}
+			return { code: 0, stdout: ids.map(id => `Uninstalling ${id}...\nExtension '${id}' was successfully uninstalled!\n`).join(''), stderr: '' };
+		};
+		const results = await uninstallExtensions(cli, run, ['odd.one', 'a.b', 'c.d']);
+		assert.deepStrictEqual(results.map(r => [r.id, r.ok]), [['odd.one', false], ['a.b', true], ['c.d', true]]);
+		assert.ok(results[0].message.includes('odd.one'), results[0].message);
+	});
+
+	test('each run of the command line can be seen, for the log', async () => {
+		const sim = strictCli(['a.b']);
+		const seen: { ids: string[]; code: number; stderr: string }[] = [];
+		await uninstallExtensions(cli, sim.run, ['ghost.one', 'a.b'], 'P', { onRun: r => seen.push({ ids: r.ids, code: r.code, stderr: r.stderr }) });
+		assert.strictEqual(seen.length, 2);
+		assert.deepStrictEqual(seen[0].ids, ['ghost.one', 'a.b']);
+		assert.strictEqual(seen[0].code, 1);
+		assert.ok(seen[0].stderr.includes('ghost.one'));
+		assert.strictEqual(seen[1].code, 0);
+	});
+});
