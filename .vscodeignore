@@ -19,3 +19,6 @@ flake.nix
 flake.lock
 .envrc
 .direnv/**
+.github/**
+perf-results/**
+e2e-artifacts/**

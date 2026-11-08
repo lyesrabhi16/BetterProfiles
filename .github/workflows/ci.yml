@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # a shared runner is slower and noisier than a laptop: the time budgets of the performance tests are multiplied by this
+  BP_PERF_SCALE: 3
+  BETTER_PROFILES_HEADLESS: 1
+
+jobs:
+  # Fast checks: types, lint, unit tests, and the performance tests of the pure logic (time budgets, and how the time grows with the data).
+  static-unit-perf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run test:perf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results-unit
+          path: perf-results/
+          if-no-files-found: ignore
+
+  # The extension, packaged once; the end-to-end tests install exactly this file.
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run package:vsix -- --out better-profiles.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: better-profiles-vsix
+          path: better-profiles.vsix
+          if-no-files-found: error
+
+  # The extension inside a real VS Code (the Extension Host), against a fake command line, in a single folder and a multi-root workspace.
+  integration:
+    needs: static-unit-perf
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: stable
+            vscode: stable
+            experimental: false
+          # engines.vscode says ^1.95.0: the oldest version we claim to support
+          - name: minimum (1.95.0)
+            vscode: 1.95.0
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    name: integration (${{ matrix.name }})
+    env:
+      VSCODE_VERSION: ${{ matrix.vscode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install what a virtual display and VS Code need
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgbm1 libnss3 libasound2t64 libgtk-3-0t64 libxss1 libxkbfile1 libsecret-1-0
+      - run: npm ci
+      - run: xvfb-run -a -s "-screen 0 1600x1000x24" npm test
+
+  # A real VS Code and its real command line, driven through its debugging port: clicks, dialogs, drag and drop, real uninstalls.
+  e2e:
+    needs: [static-unit-perf, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install what a virtual display and VS Code need
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgbm1 libnss3 libasound2t64 libgtk-3-0t64 libxss1 libxkbfile1 libsecret-1-0
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: better-profiles-vsix
+          path: dist-vsix
+      - name: End-to-end tests
+        run: npm run test:e2e:headless
+        env:
+          BETTER_PROFILES_VSIX: ${{ github.workspace }}/dist-vsix/better-profiles.vsix
+      - name: End-to-end performance tests
+        run: npm run test:e2e:perf:headless
+        env:
+          BETTER_PROFILES_VSIX: ${{ github.workspace }}/dist-vsix/better-profiles.vsix
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: |
+            perf-results/
+            e2e-artifacts/
+          if-no-files-found: ignore

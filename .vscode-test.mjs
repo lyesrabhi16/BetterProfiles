@@ -6,11 +6,11 @@ import * as path from 'node:path';
 // Every run gets its own user-data and extensions dirs, so the tests never touch your real VS Code profiles.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'better-profiles-test-'));
 
-// BETTER_PROFILES_VSCODE: path to an installed VS Code executable (the Nix dev shell sets it). Without it the latest
-// stable VS Code is downloaded.
+// BETTER_PROFILES_VSCODE: path to an installed VS Code executable (the Nix dev shell sets it). Without it VS Code is
+// downloaded: the latest stable one, or VSCODE_VERSION ("insiders", or a version such as 1.95.0).
 const installation = process.env.BETTER_PROFILES_VSCODE
 	? { useInstallation: { fromPath: process.env.BETTER_PROFILES_VSCODE } }
-	: { version: 'stable' };
+	: { version: process.env.VSCODE_VERSION ?? 'stable' };
 
 // BETTER_PROFILES_HEADLESS=1 adds the flags needed under Xvfb (no GPU, X11, no sandbox).
 const headless = process.env.BETTER_PROFILES_HEADLESS ? ['--disable-gpu', '--ozone-platform=x11', '--no-sandbox'] : [];
