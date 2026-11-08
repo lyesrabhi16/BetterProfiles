@@ -56,7 +56,22 @@ export interface SessionOptions {
 }
 
 export class Session {
-	constructor(readonly sandbox: Sandbox, readonly window: Window, readonly ui: Ui, readonly profile: string) { }
+	/** What the default profile's list looked like before any test touched it (see `restoreDefaultIndex`). */
+	private defaultIndex: string | undefined;
+
+	constructor(readonly sandbox: Sandbox, readonly window: Window, readonly ui: Ui, readonly profile: string) {
+		this.defaultIndex = fs.readFileSync(sandbox.indexFile('Default'), 'utf8');
+	}
+
+	/**
+	 * A test that makes an extension "applied to all profiles" has to write that into the default profile's list by hand (VS Code only
+	 * offers it on a screen of its own). This puts the list back, so that the next test does not start with that extension protected.
+	 */
+	restoreDefaultIndex(): void {
+		if (this.defaultIndex !== undefined) {
+			fs.writeFileSync(this.sandbox.indexFile('Default'), this.defaultIndex);
+		}
+	}
 
 	/** The command line of the sandbox, as the extension itself would run it. */
 	invocation(): CliInvocation {
@@ -74,6 +89,7 @@ export class Session {
 
 	/** Makes a profile have exactly these fixture extensions, whatever it had: the tests start from a known state. */
 	async setFixtures(profile: string, wanted: FixtureExtension[]): Promise<void> {
+		this.restoreDefaultIndex();
 		const want = new Set(wanted.map(idOf));
 		const have = await this.fixtures(profile);
 		const extra = have.filter(id => !want.has(id));
@@ -140,8 +156,28 @@ export async function captureOnFailure(session: Session | undefined, test: Mocha
 		fs.mkdirSync(dir, { recursive: true });
 		const name = test.fullTitle().replace(/[^a-z0-9]+/gi, '-').slice(0, 120);
 		fs.writeFileSync(path.join(dir, `${name}.png`), await session.ui.cdp.screenshot());
-		fs.writeFileSync(path.join(dir, `${name}.txt`), JSON.stringify({ groups: await session.ui.rows('GROUPS'), profiles: await session.ui.rows('PROFILES'), notifications: await session.ui.notifications(), dialog: await session.ui.dialog(), tabs: await session.ui.tabs() }, null, 2));
+		fs.writeFileSync(path.join(dir, `${name}.txt`), JSON.stringify({ groups: await session.ui.rows('GROUPS'), profiles: await session.ui.rows('PROFILES'), notifications: await session.ui.notifications(), dialog: await session.ui.dialog(), tabs: await session.ui.tabs(), groupsFile: session.sandbox.readGroups(), fixturesInProfiles: Object.fromEntries(await Promise.all(['Default', session.profile].map(async p => [p, await session.sandbox.list(p)]))), extensionLog: extensionLog(session.sandbox.userData) }, null, 2));
 	} catch {
 		// a failing screenshot must not hide the failure of the test
 	}
+}
+
+/** The last lines of what the extension under test wrote to its log (VS Code keeps one folder of logs per window). */
+function extensionLog(userData: string): string[] {
+	const found: string[] = [];
+	const walk = (dir: string, depth: number) => {
+		if (depth > 5) {
+			return;
+		}
+		for (const entry of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) {
+			const full = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				walk(full, depth + 1);
+			} else if (entry.name === 'Better Profiles.log') {
+				found.push(...fs.readFileSync(full, 'utf8').split(/\r?\n/).filter(Boolean).slice(-60));
+			}
+		}
+	};
+	walk(path.join(userData, 'logs'), 0);
+	return found;
 }

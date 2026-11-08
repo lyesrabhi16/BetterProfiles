@@ -44,6 +44,11 @@ export class Ui {
 
 	/** The sidebar of Better Profiles: opens it from the activity bar and waits for both trees. */
 	async openBetterProfiles(): Promise<void> {
+		// A list only draws the rows that fit: in a small window the row a test looks for is not there at all.
+		const size = await waitFor('the window to have a size', () => this.cdp.evaluate<{ w: number; h: number } | null>(`window.innerWidth > 0 ? { w: window.innerWidth, h: window.innerHeight } : null`), { timeoutMs: 90_000, intervalMs: 250 });
+		if (size.w < 1200 || size.h < 750) {
+			throw new Error(`The window is ${size.w}x${size.h}, too small to show the trees. Run the tests on a bigger screen (xvfb-run -a -s "-screen 0 1600x1000x24" ...).`);
+		}
 		await waitFor('the Better Profiles icon in the activity bar', async () => this.cdp.evaluate<boolean>(`!!document.querySelector('.activitybar [aria-label^="Better Profiles"]')`), { timeoutMs: 90_000, intervalMs: 250 });
 		const visible = await this.cdp.evaluate<boolean>(`[...document.querySelectorAll('.pane-header')].some(h => /^\\s*PROFILES/i.test(h.textContent || ''))`);
 		if (!visible) {
@@ -298,6 +303,43 @@ export class Ui {
 
 	tabs(): Promise<string[]> {
 		return this.cdp.evaluate<string[]>(`[...document.querySelectorAll('.tabs-container .tab')].map(t => t.getAttribute('aria-label') || (t.textContent || '').trim())`);
+	}
+
+	/**
+	 * Waits until the trees stop changing: a command line run that changed a list makes the tree redraw a moment later, and a click
+	 * that lands in the middle of a redraw is lost.
+	 */
+	async settled(quietMs = 500, timeoutMs = 20_000): Promise<void> {
+		const signature = async () => JSON.stringify([await this.rows('GROUPS'), await this.rows('PROFILES')]);
+		const end = Date.now() + timeoutMs;
+		let last = await signature();
+		let since = Date.now();
+		while (Date.now() < end) {
+			await sleep(60);
+			const now = await signature();
+			if (now !== last) {
+				last = now;
+				since = Date.now();
+			} else if (Date.now() - since >= quietMs) {
+				return;
+			}
+		}
+		throw new Error(`The trees did not stop changing in ${timeoutMs} ms.`);
+	}
+
+	/** Presses a quick button and waits for the dialog it opens; presses again if the click was lost in a redraw. */
+	async pressRowButtonForDialog(section: Section, label: string, title: string): Promise<{ message: string; detail: string; buttons: string[] }> {
+		for (let attempt = 1; ; attempt++) {
+			await this.pressRowButton(section, label, title);
+			try {
+				return await this.waitForDialog({ timeoutMs: attempt < 3 ? 2500 : 15_000 });
+			} catch (error) {
+				if (attempt >= 3) {
+					throw error;
+				}
+				await this.settled(300);
+			}
+		}
 	}
 
 	/** Clears what a previous test left open. */
