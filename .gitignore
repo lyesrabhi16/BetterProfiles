@@ -5,3 +5,5 @@ node_modules
 *.vsix
 commands.txt
 .direnv/
+perf-results
+e2e-artifacts
