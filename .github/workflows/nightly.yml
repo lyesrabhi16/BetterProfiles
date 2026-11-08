@@ -12,6 +12,8 @@ permissions:
 
 env:
   BETTER_PROFILES_HEADLESS: 1
+  # the strict budgets (over a budget fails), twice as long as on a quiet machine: a quiet schedule is where they are meaningful
+  BP_PERF_MODE: strict
   BP_PERF_SCALE: 2
 
 jobs:
@@ -37,6 +39,9 @@ jobs:
       - run: npm ci
       - run: npm run test:e2e:headless
       - run: npm run test:e2e:perf:headless
+      - name: Performance summary
+        if: always()
+        run: node scripts/perf-summary.js >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

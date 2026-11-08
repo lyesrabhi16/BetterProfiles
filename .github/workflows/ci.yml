@@ -14,8 +14,9 @@ permissions:
   contents: read
 
 env:
-  # a shared runner is slower and noisier than a laptop: the time budgets of the performance tests are multiplied by this
-  BP_PERF_SCALE: 3
+  # A shared runner is noisy, so a fixed time budget is advisory here: going over it is a warning (shown on the run and in the summary),
+  # and only a time more than 10 times the budget fails. The checks of how the time grows with the data, and every behaviour test, still fail.
+  BP_PERF_MODE: lenient
   BETTER_PROFILES_HEADLESS: 1
 
 jobs:
@@ -34,6 +35,9 @@ jobs:
       - run: npm run lint
       - run: npm run test:unit
       - run: npm run test:perf
+      - name: Performance summary
+        if: always()
+        run: node scripts/perf-summary.js >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -116,6 +120,9 @@ jobs:
         run: npm run test:e2e:perf:headless
         env:
           BETTER_PROFILES_VSIX: ${{ github.workspace }}/dist-vsix/better-profiles.vsix
+      - name: Performance summary
+        if: always()
+        run: node scripts/perf-summary.js >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

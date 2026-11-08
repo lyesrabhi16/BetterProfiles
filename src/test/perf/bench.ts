@@ -1,14 +1,20 @@
 // A tiny benchmark kit for the performance tests. Two kinds of check, because a fixed time limit means different things on
 // different machines:
-//   - `within`: a generous time budget (scaled by BP_PERF_SCALE for slow runners). It catches a hot path that got much slower.
+//   - `within` / `judge`: a fixed time budget (scaled by BP_PERF_SCALE). BP_PERF_MODE says what going over it means:
+//       strict (the default; nightly and release runs): over the budget fails the test.
+//       lenient (pull requests, the pre-push hook): over the budget is a warning that is recorded and shown, and the test fails
+//       only above 10 times the budget, which is a real regression and not a noisy machine.
 //   - `scalesLinearly`: how the time grows when the data grows. It does not depend on the machine, so it catches
-//     an accidental quadratic loop anywhere.
+//     an accidental quadratic loop anywhere, and it always fails the test.
 // Every measurement is also written to perf-results/<file>.json (BP_PERF_OUT changes the folder) for CI to keep.
 
 import * as fs from 'fs';
 import * as path from 'path';
 
 const SCALE = Number(process.env.BP_PERF_SCALE ?? '1') || 1;
+const LENIENT = process.env.BP_PERF_MODE === 'lenient';
+/** In lenient mode a test fails only above this many times its budget. */
+const LENIENT_FACTOR = 10;
 const OUT = process.env.BP_PERF_OUT ?? path.resolve(__dirname, '../../../perf-results');
 
 export interface Measurement {
@@ -18,6 +24,8 @@ export interface Measurement {
 	budgetMs?: number;
 	runs: number;
 	note?: string;
+	/** "slow": over the budget, but not enough to fail the test (lenient mode). */
+	status?: 'ok' | 'slow';
 }
 
 const results: Measurement[] = [];
@@ -43,14 +51,32 @@ export function record(measurement: Measurement): void {
 	results.push(measurement);
 }
 
-/** Measures \`fn\`, records it, and fails when it takes longer than the budget (scaled for slow machines). */
+/**
+ * Records a measurement against its budget and says what it means: nothing when it is within the budget, a warning when it is over
+ * but the mode is lenient, and an error when it is over in strict mode or far over (10 times) in lenient mode.
+ */
+export function judge(name: string, ms: number, budgetMs: number, options: { runs?: number; note?: string } = {}): void {
+	const budget = budgetMs * SCALE;
+	const rounded = Math.round(ms * 100) / 100;
+	const limit = LENIENT ? budget * LENIENT_FACTOR : budget;
+	const over = ms > budget;
+	record({ name, ms: rounded, budgetMs: budget, runs: options.runs ?? 1, note: options.note, status: over ? 'slow' : 'ok' });
+	if (ms > limit) {
+		throw new Error(`${name} took ${rounded} ms, the budget is ${budget} ms${LENIENT ? ` (and ${limit} ms is the most a noisy machine can explain)` : ''}`);
+	}
+	if (over) {
+		const message = `${name} took ${rounded} ms, over its budget of ${budget} ms (not a failure: the budgets are advisory in lenient mode)`;
+		console.warn(`      \u26a0 ${message}`);
+		if (process.env.GITHUB_ACTIONS) {
+			console.log(`::warning title=Performance budget::${message}`);
+		}
+	}
+}
+
+/** Measures \`fn\` and judges it against its budget. */
 export async function within(name: string, budgetMs: number, fn: () => unknown | Promise<unknown>, options: { runs?: number; warmup?: number } = {}): Promise<number> {
 	const ms = await measure(fn, options);
-	const budget = budgetMs * SCALE;
-	record({ name, ms: Math.round(ms * 100) / 100, budgetMs: budget, runs: options.runs ?? 9 });
-	if (ms > budget) {
-		throw new Error(`${name} took ${ms.toFixed(1)} ms, the budget is ${budget} ms`);
-	}
+	judge(name, ms, budgetMs, { runs: options.runs ?? 9 });
 	return ms;
 }
 

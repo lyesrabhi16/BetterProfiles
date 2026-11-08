@@ -1,30 +1,25 @@
 import * as assert from 'assert';
 import { EXT, Session, captureOnFailure, idOf, startSession } from './session';
 import { Cdp } from './cdp';
-import { flush, record } from '../test/perf/bench';
+import { flush, judge, record } from '../test/perf/bench';
 import { waitFor } from './ui';
 import { FixtureExtension } from './vsix';
 
 void Cdp;
 
-const SCALE = Number(process.env.BP_PERF_SCALE ?? '1') || 1;
 const COUNT = 30;
 const bulk: FixtureExtension[] = Array.from({ length: COUNT }, (_, i) => ({ publisher: 'bptest', name: `perf${i}`, version: '1.0.0', displayName: `Perf Tool ${i}` }));
 
 /**
- * How fast the tab answers in a real VS Code, with a group of thirty extensions. The budgets are generous (a shared CI machine is
- * slow, and these are UI timings); what matters is that "instant" stays far below a second, and every number is kept in
- * perf-results/e2e.json so that a slow drift can be seen over runs.
+ * How fast the tab answers in a real VS Code, with a group of thirty extensions. The budgets say what "instant" means (well under
+ * a second); what a run over a budget means depends on BP_PERF_MODE (see bench.ts). Every number is kept in perf-results/e2e.json so
+ * that a slow drift can be seen over runs.
  */
 suite('e2e performance: the tab answers at once', function () {
 	this.timeout(240_000);
 	let s: Session;
 
-	const check = (name: string, ms: number, budgetMs: number, note?: string) => {
-		const budget = budgetMs * SCALE;
-		record({ name, ms: Math.round(ms), budgetMs: budget, runs: 1, note });
-		assert.ok(ms <= budget, `${name} took ${Math.round(ms)} ms, the budget is ${budget} ms`);
-	};
+	const check = (name: string, ms: number, budgetMs: number, note?: string) => judge(name, Math.round(ms), budgetMs, { note });
 
 	suiteSetup(async function () {
 		this.timeout(500_000);
@@ -84,8 +79,7 @@ suite('e2e performance: the tab answers at once', function () {
 		check('thirty extensions gone after confirming', Date.now() - confirmed, 1500);
 		await waitFor('all thirty to be uninstalled', async () => (await s.fixtures('Python')).filter(id => id.startsWith('bptest.perf')).length === 0, { timeoutMs: 180_000, intervalMs: 500 });
 		const finished = Date.now() - confirmed;
-		record({ name: 'the command line finishing (thirty extensions), for reference', ms: finished, budgetMs: 60_000 * SCALE, runs: 1, note: 'one run of the command line takes them all' });
-		assert.ok(finished < 60_000 * SCALE, `the uninstall took ${finished} ms`);
+		check('the command line finishing (thirty extensions)', finished, 60_000, 'one run of the command line takes them all');
 	});
 
 	test('the trees are read again at once on Refresh', async () => {

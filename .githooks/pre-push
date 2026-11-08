@@ -20,5 +20,5 @@ if ! command -v node >/dev/null 2>&1 || [ ! -x node_modules/.bin/mocha ]; then
 fi
 
 npm run test:unit || exit 1
-# the time budgets are for a quiet machine: a laptop that is busy pushing gets twice as long (BP_PERF_SCALE overrides)
-BP_PERF_SCALE="${BP_PERF_SCALE:-2}" npm run test:perf || exit 1
+# a time budget is advisory here (a warning); only the growth checks and a time 10 times over a budget stop a push
+BP_PERF_MODE="${BP_PERF_MODE:-lenient}" npm run test:perf || exit 1

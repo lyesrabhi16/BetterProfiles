@@ -384,14 +384,14 @@ your own VS Code or profiles.
 | Layer | Command | What it is | Where |
 |---|---|---|---|
 | **Unit** | `npm run test:unit` | The pure logic (groups, graph, indexes, store, catalog, command line parsing, wording) in plain Node. Seconds. | `src/test/unit` |
-| **Performance** | `npm run test:perf` | Time budgets for the hot paths on big inputs (2000 extensions, 200 groups, 20 profiles), and **scaling checks**: 4 times the data must not take much more than 4 times the time, which catches an accidental loop inside a loop on any machine. Writes `perf-results/pure.json`. | `src/test/perf` |
+| **Performance** | `npm run test:perf` | Time budgets for the hot paths on big inputs (2000 extensions, 200 groups, 20 profiles), and **scaling checks**: 4 times the data must not take much more than 4 times the time, which catches an accidental loop inside a loop on any machine. The scaling checks always fail a test; what a fixed budget means depends on `BP_PERF_MODE` (below). Writes `perf-results/pure.json`. | `src/test/perf` |
 | **Integration** | `npm test` | The extension inside a real VS Code (the Extension Host) against a **fake command line** (`test-fixtures/stub-code.js`, which stops at the first failure like the real one, can list "ghost" extensions, and can be slowed down): every command, the trees, drag and drop, the graph, the prompts. Two windows: a single folder named with spaces and an accent (VS Code stores its URI percent-encoded) and the two-folder workspace in `test-fixtures/multi-root`. | `src/test/*.test.ts`, `src/test/multiroot` |
 | **End to end** | `npm run test:e2e` (`:headless` on a machine without a display) | A **real VS Code and its real command line** in a sandbox, driven through its debugging port with real mouse events (clicks, hover buttons, Ctrl-click selection, real drag and drop). Fixture extensions are built on the fly (`src/e2e/vsix.ts`), some depending on others, so the real uninstall refuses and retries as it does for a user. Needs no network. | `src/e2e` (`*.e2e.ts`) |
 | **End-to-end performance** | `npm run test:e2e:perf` (`:headless`) | How fast the tab answers in that real window with a group of thirty extensions: the question before an uninstall, the extension leaving the tree, the group leaving, Refresh, the graph. Writes `perf-results/e2e.json`. | `src/e2e/ui.perf.ts` |
 
 Useful settings: `BETTER_PROFILES_VSCODE` (path to a VS Code executable; without it one is downloaded), `VSCODE_VERSION` (`insiders`, or a
 version such as `1.95.0`), `BETTER_PROFILES_HEADLESS=1` (flags a virtual display needs), `BETTER_PROFILES_VSIX` (an already packaged
-extension for the end-to-end tests; otherwise they package it), `BP_PERF_SCALE` (multiplies every time budget, for a slow machine),
+extension for the end-to-end tests; otherwise they package it), `BP_PERF_SCALE` (multiplies every time budget, for a slow machine), `BP_PERF_MODE` (`strict`, the default: over a budget fails; `lenient`: over a budget is a warning and only more than 10 times the budget fails, which is what CI on pull requests and the pre-push hook use, because a shared machine is noisy),
 `BP_E2E_NETWORK=1` (also run the test that installs from the Marketplace). The end-to-end tests need Node 22 (a WebSocket) and a window of
 at least 1200x750: with `xvfb-run` that means `-s "-screen 0 1600x1000x24"`, which the `:headless` scripts do. When an end-to-end test fails
 it saves a screenshot, the rows of both trees, the notifications, the groups file, what each profile has and the extension's log under
@@ -407,8 +407,7 @@ hooks without doing anything else.
 
 - **`pre-commit`** refuses leftover merge conflict markers and `.only` on a test, and when TypeScript or the project settings changed it lints the
   staged TypeScript (no warnings allowed) and type-checks the project. A few seconds.
-- **`pre-push`** runs the unit and performance tests (about 15 seconds; the performance budgets are doubled on a laptop, `BP_PERF_SCALE` changes
-  that). It does nothing when you only delete a branch. The slower layers run in CI.
+- **`pre-push`** runs the unit and performance tests (about 15 seconds; the time budgets are advisory there, see `BP_PERF_MODE`). It does nothing when you only delete a branch. The slower layers run in CI.
 
 If `node` or `node_modules` is missing, the hook **fails** and says to enter the dev shell or run `npm ci`: a check that cannot run is not a
 passing check. Skip a hook once with `git commit --no-verify` / `git push --no-verify`; a hook cannot be forced on anyone, so CI runs the same
@@ -420,11 +419,12 @@ checks on every pull request.
 
 - **CI** (every push and pull request): types, lint, unit and performance tests; the `.vsix` is packaged once; the integration suite runs on
   the stable VS Code and, as an informational job, on the oldest version `engines` allows (1.95.0); the end-to-end and end-to-end performance
-  tests install that exact `.vsix`. Time budgets are multiplied by 3 on the shared runners. Performance numbers, screenshots and logs are
+  tests install that exact `.vsix`. Fixed time budgets are advisory there (a warning on the run and a table in the job summary; only more than 10
+  times a budget fails), while the growth checks and every behaviour test still fail the build. Performance numbers, screenshots and logs are
   uploaded as artifacts.
 - **Nightly**: the end-to-end tests with the Marketplace test enabled on stable and on Insiders, and the integration suite on Insiders, so a
-  change in an upcoming VS Code shows up before it ships.
-- **Release** (a tag such as `v1.2.0`, which must equal the version in `package.json`): everything above on the file that will be released,
+  change in an upcoming VS Code shows up before it ships. Its performance tests use the strict budgets, on a quiet schedule.
+- **Release** (a tag such as `v1.2.0`, which must equal the version in `package.json`): everything above on the file that will be released (with the strict performance budgets),
   then a GitHub release with the `.vsix`; it is published to the Visual Studio Marketplace and to Open VSX only if the `VSCE_PAT` and
   `OVSX_PAT` secrets exist.
 
