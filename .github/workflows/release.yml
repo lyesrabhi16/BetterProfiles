@@ -47,12 +47,12 @@ jobs:
           npm run test:e2e:perf:headless
         env:
           BETTER_PROFILES_VSIX: ${{ github.workspace }}/better-profiles.vsix
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: better-profiles-vsix
           path: better-profiles.vsix
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: release-test-results

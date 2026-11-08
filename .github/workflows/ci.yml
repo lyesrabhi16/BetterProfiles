@@ -38,7 +38,7 @@ jobs:
       - name: Performance summary
         if: always()
         run: node scripts/perf-summary.js >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: perf-results-unit
@@ -57,7 +57,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run package:vsix -- --out better-profiles.vsix
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: better-profiles-vsix
           path: better-profiles.vsix
@@ -123,7 +123,7 @@ jobs:
       - name: Performance summary
         if: always()
         run: node scripts/perf-summary.js >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-results
