@@ -400,12 +400,19 @@ it saves a screenshot, the rows of both trees, the notifications, the groups fil
 A bug that was fixed gets a test in the layer where it shows: the two that were only visible in a real window (a title button runs with the
 focused item; a refresh aimed at an item VS Code does not know is ignored) are end-to-end tests.
 
-### Git hook
+### Git hooks
 
 `npm install` (or `npm ci`) points git at `.githooks` (the `prepare` script sets `core.hooksPath`), so everyone who sets the project up gets the
-`pre-commit` hook without doing anything else. Before a commit it refuses leftover merge conflict markers and `.only` on a test, and when
-TypeScript or the project settings changed it lints the staged TypeScript and type-checks the project (a few seconds). Skip it once with
-`git commit --no-verify`; a hook cannot be forced on anyone, so CI runs the same checks on every pull request.
+hooks without doing anything else.
+
+- **`pre-commit`** refuses leftover merge conflict markers and `.only` on a test, and when TypeScript or the project settings changed it lints the
+  staged TypeScript (no warnings allowed) and type-checks the project. A few seconds.
+- **`pre-push`** runs the unit and performance tests (about 15 seconds; the performance budgets are doubled on a laptop, `BP_PERF_SCALE` changes
+  that). It does nothing when you only delete a branch. The slower layers run in CI.
+
+If `node` or `node_modules` is missing, the hook **fails** and says to enter the dev shell or run `npm ci`: a check that cannot run is not a
+passing check. Skip a hook once with `git commit --no-verify` / `git push --no-verify`; a hook cannot be forced on anyone, so CI runs the same
+checks on every pull request.
 
 ### Continuous integration and delivery
 
