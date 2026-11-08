@@ -12,7 +12,8 @@
     "Other"
   ],
   "extensionKind": [
-    "workspace", "ui"
+    "workspace",
+    "ui"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -21,34 +22,469 @@
   "contributes": {
     "commands": [
       {
-        "command": "better-profiles.activate",
-        "title": "EW: Activate Extension"
-      }  
+        "command": "better-profiles.switchProfile",
+        "title": "Switch Profile",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.compareProfiles",
+        "title": "Compare Extensions Across Profiles",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.showGraph",
+        "title": "Show Graph",
+        "category": "Better Profiles",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "better-profiles.addToGroup",
+        "title": "Add Extensions To Group",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.assignGroup",
+        "title": "Give A Group To A Profile",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.syncProfile",
+        "title": "Sync Profile With Its Groups",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.editGroups",
+        "title": "Edit Groups File",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.resetPrompts",
+        "title": "Reset Sync Prompts",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.setGroupTriggers",
+        "title": "Set Workspace Triggers For A Group",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.extensionAddToGroup",
+        "title": "[Better Profiles] Add to Group"
+      },
+      {
+        "command": "better-profiles.extensionRemoveFromGroup",
+        "title": "[Better Profiles] Remove from Group"
+      },
+      {
+        "command": "better-profiles.extensionInstallInProfiles",
+        "title": "[Better Profiles] Install in Other Profiles"
+      },
+      {
+        "command": "better-profiles.view.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "better-profiles.view.newGroup",
+        "title": "New Group",
+        "icon": "$(add)"
+      },
+      {
+        "command": "better-profiles.view.deleteGroup",
+        "title": "Delete Group",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "better-profiles.view.removeFromGroup",
+        "title": "Remove From Group",
+        "icon": "$(close)"
+      },
+      {
+        "command": "better-profiles.view.syncProfile",
+        "title": "Sync Profile With Its Groups",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "better-profiles.view.setTriggers",
+        "title": "Set Workspace Triggers"
+      },
+      {
+        "command": "better-profiles.view.assignGroup",
+        "title": "Give To A Profile"
+      },
+      {
+        "command": "better-profiles.view.clickExtension",
+        "title": "Open Extension Page"
+      },
+      {
+        "command": "better-profiles.view.openExtension",
+        "title": "Open Extension Page"
+      },
+      {
+        "command": "better-profiles.view.copyExtensionId",
+        "title": "Copy Extension Id"
+      },
+      {
+        "command": "better-profiles.view.addExtensionToGroup",
+        "title": "Add to Group"
+      },
+      {
+        "command": "better-profiles.view.installExtensionInProfiles",
+        "title": "Install in Other Profiles"
+      },
+      {
+        "command": "better-profiles.view.removeFromProfile",
+        "title": "Remove From Profile",
+        "icon": "$(close)"
+      },
+      {
+        "command": "better-profiles.view.removeExtensionFromProfile",
+        "title": "Remove From Profile",
+        "icon": "$(close)"
+      },
+      {
+        "command": "better-profiles.removeGroupFromProfile",
+        "title": "Remove Group From Profile",
+        "category": "Better Profiles"
+      },
+      {
+        "command": "better-profiles.removeExtensionFromProfile",
+        "title": "Remove Extension From Profile",
+        "category": "Better Profiles"
+      }
+    ],
+    "configuration": {
+      "title": "Better Profiles",
+      "properties": {
+        "betterProfiles.storageFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Advanced. Path to VS Code's `storage.json`, where profiles and their workspace associations are recorded. Leave empty to use the one next to this extension's global storage."
+        },
+        "betterProfiles.groupsFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Where your extension groups are kept. Leave empty to use `groups.json` in this extension's global storage, which every profile shares. Point it into a dotfiles repository to version it."
+        },
+        "betterProfiles.codeCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Advanced. An executable to run instead of this VS Code's own command line (for example a custom build). Used to list and install extensions per profile. Leave empty to use the built-in one."
+        },
+        "betterProfiles.codeArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "Advanced. Arguments that always come first when `#betterProfiles.codeCommand#` runs, for example `--user-data-dir` and `--extensions-dir` for a portable or non-default installation."
+        },
+        "betterProfiles.autoSync": {
+          "type": "string",
+          "enum": [
+            "off",
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Never check whether a profile has the extensions of its groups.",
+            "Shortly after startup, ask before installing what the current profile is missing.",
+            "Install what the current profile is missing without asking. Nothing is ever uninstalled automatically."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "markdownDescription": "Whether the current profile is brought up to date with its extension groups. Uninstalling is never automatic: it only happens through `Better Profiles: Sync Profile With Its Groups`, which lists what would go and asks first."
+        },
+        "betterProfiles.keepExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "Extension ids (`publisher.name`) that are never offered for uninstalling, even when no group mentions them."
+        },
+        "betterProfiles.extensionsDir": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Advanced. The folder where VS Code keeps the installed extensions (for example `~/.vscode/extensions`). It is used to read each extension's name and icon for the Better Profiles tab, and to run VS Code's command line against the right installation. Leave empty to find it from the extensions that are installed."
+        },
+        "betterProfiles.listFromFiles": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "Read the list of extensions of each profile from the files VS Code keeps (instant, and noticed when something else changes them) instead of starting VS Code's command line for every list. Turn it off to always use the command line. The command line is also used whenever those files cannot be read."
+        }
+      }
+    },
+    "menus": {
+      "extension/context": [
+        {
+          "command": "better-profiles.extensionAddToGroup",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false",
+          "group": "2_profiles@1"
+        },
+        {
+          "command": "better-profiles.extensionRemoveFromGroup",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false && extension in betterProfiles.groupedExtensions",
+          "group": "2_profiles@2"
+        },
+        {
+          "command": "better-profiles.extensionInstallInProfiles",
+          "when": "extensionStatus == installed && !isBuiltinExtension && isWorkspaceScopedExtension == false",
+          "group": "2_profiles@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "better-profiles.extensionAddToGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.extensionRemoveFromGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.extensionInstallInProfiles",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.refresh",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.newGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.deleteGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.syncProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.setTriggers",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.assignGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.clickExtension",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.openExtension",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.copyExtensionId",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.addExtensionToGroup",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.installExtensionInProfiles",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.removeFromProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.view.removeExtensionFromProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.removeGroupFromProfile",
+          "when": "false"
+        },
+        {
+          "command": "better-profiles.removeExtensionFromProfile",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "better-profiles.showGraph",
+          "when": "view == betterProfiles.groups || view == betterProfiles.profiles",
+          "group": "navigation@0"
+        },
+        {
+          "command": "better-profiles.view.newGroup",
+          "when": "view == betterProfiles.groups",
+          "group": "navigation@1"
+        },
+        {
+          "command": "better-profiles.view.refresh",
+          "when": "view == betterProfiles.groups || view == betterProfiles.profiles",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "view == betterProfiles.groups && viewItem == groupExtension",
+          "group": "inline"
+        },
+        {
+          "command": "better-profiles.view.syncProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profile",
+          "group": "inline"
+        },
+        {
+          "command": "better-profiles.view.assignGroup",
+          "when": "view == betterProfiles.groups && viewItem == group",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.setTriggers",
+          "when": "view == betterProfiles.groups && viewItem == group",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "better-profiles.view.deleteGroup",
+          "when": "view == betterProfiles.groups && viewItem == group",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.removeFromGroup",
+          "when": "view == betterProfiles.groups && viewItem == groupExtension",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.syncProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profile",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.openExtension",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "0_open@1"
+        },
+        {
+          "command": "better-profiles.view.addExtensionToGroup",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.installExtensionInProfiles",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "better-profiles.view.copyExtensionId",
+          "when": "(view == betterProfiles.groups || view == betterProfiles.profiles) && viewItem =~ /^(groupExtension|profileGroupExtension|profileExtension)$/",
+          "group": "2_copy@1"
+        },
+        {
+          "command": "better-profiles.view.assignGroup",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "better-profiles.view.setTriggers",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "1_modify@2"
+        },
+        {
+          "command": "better-profiles.view.removeFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.removeFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem == profileGroup",
+          "group": "inline"
+        },
+        {
+          "command": "better-profiles.view.removeExtensionFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem =~ /^(profileGroupExtension|profileExtension)$/",
+          "group": "3_delete@1"
+        },
+        {
+          "command": "better-profiles.view.removeExtensionFromProfile",
+          "when": "view == betterProfiles.profiles && viewItem =~ /^(profileGroupExtension|profileExtension)$/",
+          "group": "inline"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "better-profiles",
+          "title": "Better Profiles",
+          "icon": "media/better-profiles.svg"
+        }
+      ]
+    },
+    "views": {
+      "better-profiles": [
+        {
+          "id": "betterProfiles.groups",
+          "name": "Groups"
+        },
+        {
+          "id": "betterProfiles.profiles",
+          "name": "Profiles"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "betterProfiles.groups",
+        "contents": "No groups yet. A group is a named set of extensions that you can give to profiles.\n[New Group](command:better-profiles.view.newGroup)"
+      }
     ]
-  },  
+  },
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
-    "compile-tests": "tsc -p . --outDir out",
+    "compile-tests": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\" && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "npm run compile-tests && mocha --ui tdd \"out/test/unit/**/*.test.js\"",
+    "typecheck": "tsc -p . --noEmit",
+    "test:perf": "npm run compile-tests && mocha --ui tdd --timeout 120000 \"out/test/perf/**/*.perf.test.js\"",
+    "test:e2e": "npm run compile-tests && mocha --ui tdd --timeout 240000 --exit \"out/e2e/*.e2e.js\"",
+    "test:e2e:perf": "npm run compile-tests && mocha --ui tdd --timeout 300000 --exit \"out/e2e/*.perf.js\"",
+    "test:e2e:headless": "BETTER_PROFILES_HEADLESS=1 xvfb-run -a -s \"-screen 0 1600x1000x24\" npm run test:e2e",
+    "test:e2e:perf:headless": "BETTER_PROFILES_HEADLESS=1 xvfb-run -a -s \"-screen 0 1600x1000x24\" npm run test:e2e:perf",
+    "package:vsix": "vsce package --no-dependencies --allow-missing-repository",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
-    "@types/vscode": "^1.95.0",
     "@types/mocha": "^10.0.9",
     "@types/node": "20.x",
+    "@types/vscode": "^1.95.0",
     "@typescript-eslint/eslint-plugin": "^8.10.0",
     "@typescript-eslint/parser": "^8.7.0",
-    "eslint": "^9.13.0",
-    "typescript": "^5.6.3",
-    "ts-loader": "^9.5.1",
-    "webpack": "^5.95.0",
-    "webpack-cli": "^5.1.4",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^4.1.0",
+    "eslint": "^9.13.0",
+    "mocha": "^10.8.2",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.6.3",
+    "webpack": "^5.95.0",
+    "webpack-cli": "^5.1.4"
   }
 }

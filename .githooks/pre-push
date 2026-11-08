@@ -1,0 +1,24 @@
+#!/bin/sh
+# Runs before every push: the unit tests and the performance tests of the pure logic (about 15 seconds). The slower layers
+# (integration, end to end) run in CI. Switched on by `npm install` (see the pre-commit hook). Skip once with: git push --no-verify
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# a push that only deletes a branch or a tag has nothing to test
+pushing=
+while read -r _ local_sha _ _; do
+	[ "$local_sha" != "0000000000000000000000000000000000000000" ] && pushing=1
+done
+[ -n "$pushing" ] || exit 0
+
+# a check that cannot run is a failed check
+if ! command -v node >/dev/null 2>&1 || [ ! -x node_modules/.bin/mocha ]; then
+	echo "pre-push: cannot run the tests, node or node_modules is missing."
+	echo "  Enter the dev shell (nix develop / direnv) or run: npm ci"
+	echo "  To push anyway: git push --no-verify (CI will run the same tests)."
+	exit 1
+fi
+
+npm run test:unit || exit 1
+# a time budget is advisory here (a warning); only the growth checks and a time 10 times over a budget stop a push
+BP_PERF_MODE="${BP_PERF_MODE:-lenient}" npm run test:perf || exit 1

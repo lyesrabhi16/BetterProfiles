@@ -4,3 +4,6 @@ node_modules
 .vscode-test/
 *.vsix
 commands.txt
+.direnv/
+perf-results
+e2e-artifacts

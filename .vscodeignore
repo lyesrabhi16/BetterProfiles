@@ -14,3 +14,11 @@ vsc-extension-quickstart.md
 **/.vscode-test.*
 .trunk/**
 commands.txt
+test-fixtures/**
+flake.nix
+flake.lock
+.envrc
+.direnv/**
+.github/**
+perf-results/**
+e2e-artifacts/**
