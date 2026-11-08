@@ -824,7 +824,7 @@ suite('Extension groups against a fake CLI', () => {
 		const ASSIGN = 'better-profiles.assignGroup';
 		const SYNC = 'Sync Profile';
 		const GIVE = 'Give Group To A Profile';
-		const until = async (condition: () => boolean, ms = 3000) => {
+		const until = async (condition: () => boolean, ms = 15_000) => {
 			const end = Date.now() + ms;
 			while (!condition() && Date.now() < end) {
 				await new Promise(resolve => setTimeout(resolve, 25));
@@ -934,7 +934,7 @@ suite('Extension groups against a fake CLI', () => {
 	suite('showing which extensions are in a group', () => {
 		const ADD = 'better-profiles.extensionAddToGroup';
 		const REMOVE = 'better-profiles.extensionRemoveFromGroup';
-		const until = async (condition: () => boolean, ms = 3000) => {
+		const until = async (condition: () => boolean, ms = 15_000) => {
 			const end = Date.now() + ms;
 			while (!condition() && Date.now() < end) {
 				await new Promise(resolve => setTimeout(resolve, 25));
@@ -1025,7 +1025,7 @@ suite('Extension groups against a fake CLI', () => {
 			return transfer;
 		};
 		const drop = (view: ViewName, target: Node | undefined, transfer: vscode.DataTransfer) => dnd(view).handleDrop?.(target, transfer, token);
-		const until = async (condition: () => boolean, ms = 3000) => {
+		const until = async (condition: () => boolean, ms = 15_000) => {
 			const end = Date.now() + ms;
 			while (!condition() && Date.now() < end) {
 				await new Promise(resolve => setTimeout(resolve, 25));
@@ -1462,7 +1462,7 @@ suite('Extension groups against a fake CLI', () => {
 
 		suite('instant actions', () => {
 			type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
-			const untilAsync = async (condition: () => Promise<boolean>, ms = 1500) => {
+			const untilAsync = async (condition: () => Promise<boolean>, ms = 15_000) => {
 				const end = Date.now() + ms;
 				while (Date.now() < end) {
 					if (await condition()) {
@@ -1490,11 +1490,11 @@ suite('Extension groups against a fake CLI', () => {
 				setup(() => writeState({ Default: ['common.one'], Python: ['a.b', 'c.d', 'p.installed', 'shared.x'], Agents: ['shared.x'] }));
 
 				test('an extension removed from a profile disappears at once, while it is still being uninstalled', async () => {
-					process.env.STUB_ACTION_DELAY_MS = '1500';
+					process.env.STUB_ACTION_DELAY_MS = '4000'; // the uninstall takes this long once it starts: the tree must not wait for it
 					answer({ confirm: () => true });
 					const running = exec<Report>('better-profiles.view.removeExtensionFromProfile', profileGroupExt('Python', 'web', 'a.b'));
-					assert.ok(await untilAsync(async () => !(await ids('profiles', profileGroup('Python', 'web'))).includes('a.b'), 900), 'gone from the tree within a second');
-					assert.ok(readState().Python.includes('a.b'), 'the command line has not finished yet');
+					assert.ok(await untilAsync(async () => !(await ids('profiles', profileGroup('Python', 'web'))).includes('a.b'), 30_000), 'gone from the tree');
+					assert.ok(readState().Python.includes('a.b'), 'it left the tree before the command line was done');
 					const report = await running;
 					assert.deepStrictEqual(report.uninstalled, ['a.b']);
 					assert.ok(!readState().Python.includes('a.b'));
@@ -1502,14 +1502,14 @@ suite('Extension groups against a fake CLI', () => {
 				});
 
 				test('a group removed from a profile takes its extensions out of the profile at once', async () => {
-					process.env.STUB_ACTION_DELAY_MS = '1500';
+					process.env.STUB_ACTION_DELAY_MS = '4000';
 					answer({ confirm: () => true });
 					const running = exec<Report>('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
 					assert.ok(await untilAsync(async () => {
 						const kids = await children('profiles', profile('Python'));
 						return !kids.some(n => n.kind === 'profileGroup' && n.name === 'web') && !kids.some(n => n.id === 'a.b' || n.id === 'c.d');
-					}, 900), 'gone from the tree within a second');
-					assert.ok(readState().Python.includes('a.b'), 'the command line has not finished yet');
+					}, 30_000), 'gone from the tree');
+					assert.ok(readState().Python.includes('a.b'), 'they left the tree before the command line was done');
 					await running;
 					assert.deepStrictEqual(readState().Python, ['p.installed', 'shared.x']);
 				});
@@ -1524,13 +1524,13 @@ suite('Extension groups against a fake CLI', () => {
 				});
 
 				test('extensions dropped on a profile appear at once, marked as being installed, and stop being marked when they are in', async () => {
-					process.env.STUB_ACTION_DELAY_MS = '1200';
+					process.env.STUB_ACTION_DELAY_MS = '4000';
 					const running = drop('profiles', profile('Agents'), await drag('groups', [groupExt('web', 'a.b'), groupExt('web', 'c.d')]));
-					assert.ok(await untilAsync(async () => (await children('profiles', profile('Agents'))).some(n => n.id === 'a.b' && n.installing === true), 900), 'shown within a second');
+					assert.ok(await untilAsync(async () => (await children('profiles', profile('Agents'))).some(n => n.id === 'a.b' && n.installing === true), 30_000), 'shown as being installed');
 					const shown = (await children('profiles', profile('Agents'))).find(n => n.id === 'a.b')!;
 					const i = await item('profiles', shown);
 					assert.ok(String(i.description).includes('installing'), String(i.description));
-					assert.ok(!readState().Agents.includes('a.b'), 'the command line has not finished yet');
+					assert.ok(!readState().Agents.includes('a.b'), 'it was shown before the command line was done');
 					await running;
 					assert.ok(readState().Agents.includes('a.b') && readState().Agents.includes('c.d'));
 					const after = await children('profiles', profile('Agents'));
@@ -1544,18 +1544,20 @@ suite('Extension groups against a fake CLI', () => {
 				});
 
 				test('a sync shows what it installs at once', async () => {
-					process.env.STUB_ACTION_DELAY_MS = '1200';
+					process.env.STUB_ACTION_DELAY_MS = '4000';
 					writeState({ Default: [], Python: ['p.installed'], Agents: [] });
 					const running = sync({ profile: 'Python' });
-					assert.ok(await untilAsync(async () => (await allOf('Python')).some(n => n.installing === true), 900), 'what is being installed is shown within a second');
+					assert.ok(await untilAsync(async () => (await allOf('Python')).some(n => n.installing === true), 30_000), 'what is being installed is shown');
+					assert.deepStrictEqual(readState().Python, ['p.installed'], 'it was shown before the command line installed anything');
 					await running;
 				});
 
 				test('Install in Other Profiles shows the extension in the profiles it goes to at once', async () => {
-					process.env.STUB_ACTION_DELAY_MS = '1200';
+					process.env.STUB_ACTION_DELAY_MS = '4000';
 					answer({ pickMany: () => ['Agents'] });
 					const running = exec('better-profiles.view.installExtensionInProfiles', profileExt('Python', 'p.installed'));
-					assert.ok(await untilAsync(async () => (await children('profiles', profile('Agents'))).some(n => n.id === 'p.installed' && n.installing === true), 900));
+					assert.ok(await untilAsync(async () => (await children('profiles', profile('Agents'))).some(n => n.id === 'p.installed' && n.installing === true), 30_000));
+					assert.ok(!readState().Agents.includes('p.installed'), 'it was shown before the command line installed it');
 					await running;
 				});
 			});
@@ -1628,7 +1630,7 @@ suite('Extension groups against a fake CLI', () => {
 					await ids('profiles', profile('Python'));
 					await new Promise(resolve => setTimeout(resolve, 300)); // the watcher is set up when a file is first read
 					writeIndex(profileIndex('p1'), [entry('p.installed'), entry('shared.x'), entry('just.arrived')]);
-					assert.ok(await untilAsync(async () => (await idsOf('Python')).includes('just.arrived'), 4000), 'noticed within a few seconds');
+					assert.ok(await untilAsync(async () => (await idsOf('Python')).includes('just.arrived'), 20_000), 'noticed');
 					assert.strictEqual(listCalls(), 0);
 				});
 
@@ -1648,11 +1650,10 @@ suite('Extension groups against a fake CLI', () => {
 				test('the question before an uninstall is asked at once, with no run of the command line first', async () => {
 					process.env.STUB_DELAY_MS = '1500'; // a command line list would take this long
 					writeGroups({ groups: { web: ['p.installed', 'x.other'] }, profiles: { Python: ['web'] } });
-					let asked = -1;
-					const started = Date.now();
-					answer({ confirm: () => { asked = Date.now() - started; return false; } });
+					let listsWhenAsked = -1;
+					answer({ confirm: () => { listsWhenAsked = listCalls(); return false; } });
 					await exec('better-profiles.view.removeFromProfile', profileGroup('Python', 'web'));
-					assert.ok(asked >= 0 && asked < 700, `asked after ${asked} ms`);
+					assert.strictEqual(listsWhenAsked, 0, 'the question was asked before any run of the command line');
 					assert.strictEqual(listCalls(), 0);
 				});
 			});
@@ -1667,7 +1668,7 @@ suite('Extension groups against a fake CLI', () => {
 			// the whole selection as a second argument.
 			type Report = { uninstalled: string[]; kept: string[]; failed: string[]; cancelled: boolean };
 			const run = <T = unknown>(command: string, clicked: Node, selection?: Node[]) => exec<T>(`better-profiles.view.${command}`, clicked, selection);
-			const untilAsync = async (condition: () => Promise<boolean>, ms = 1500) => {
+			const untilAsync = async (condition: () => Promise<boolean>, ms = 15_000) => {
 				const end = Date.now() + ms;
 				while (Date.now() < end) {
 					if (await condition()) {
@@ -1817,15 +1818,15 @@ suite('Extension groups against a fake CLI', () => {
 				});
 
 				test('all of them leave the tree at once', async () => {
-					process.env.STUB_ACTION_DELAY_MS = '1500';
+					process.env.STUB_ACTION_DELAY_MS = '4000';
 					answer({ confirm: () => true });
 					const running = run('removeExtensionFromProfile', three()[0], three());
 					assert.ok(await untilAsync(async () => {
 						const kids = await children('profiles', profileGroup('Python', 'web'));
 						const top = await children('profiles', profile('Python'));
 						return kids.length === 0 && !top.some(n => n.id === 'p.installed');
-					}, 900), 'all three gone within a second');
-					assert.ok(readState().Python.includes('a.b'), 'the command line has not finished yet');
+					}, 30_000), 'all three gone from the tree');
+					assert.ok(readState().Python.includes('a.b'), 'they left the tree before the command line was done');
 					await running;
 				});
 
@@ -2384,15 +2385,22 @@ suite('Extension groups against a fake CLI', () => {
 				});
 
 				test('the profiles are listed side by side, not one after the other', async () => {
-					process.env.STUB_DELAY_MS = '500';
+					// Each list takes 1.5 s once it has started. If two of them were run one after the other, the second would start after
+					// the first ended; run side by side, they overlap. That holds on a slow machine too, which a time limit does not.
+					const timing = path.join(dir, 'timing.log');
+					process.env.STUB_DELAY_MS = '1500';
+					process.env.STUB_TIMING = timing;
 					try {
 						answer({ confirm: () => true });
-						const started = Date.now();
 						await removeGroup();
-						const took = Date.now() - started;
-						assert.ok(took < 1300, `three lists of 500 ms one after the other would take over 1500 ms; it took ${took} ms`);
+						const lists = fs.readFileSync(timing, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line) as { profile: string; op: string; start: number; end: number });
+						const others = lists.filter(entry => entry.op === 'list' && entry.profile !== 'Python'); // Python is read first, the others together
+						assert.strictEqual(others.length, 2, JSON.stringify(lists));
+						const [first, second] = others;
+						assert.ok(first.start < second.end && second.start < first.end, `the lists of ${first.profile} and ${second.profile} did not overlap: ${JSON.stringify(others)}`);
 					} finally {
 						delete process.env.STUB_DELAY_MS;
+						delete process.env.STUB_TIMING;
 					}
 				});
 

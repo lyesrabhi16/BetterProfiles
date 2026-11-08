@@ -11,6 +11,9 @@ const flag = name => {
 	return i >= 0 ? args[i + 1] : undefined;
 };
 const profile = flag('--profile') ?? 'Default';
+const began = Date.now();
+// STUB_TIMING: a file that gets one line {profile, op, start, end} per list, to tell whether two lists overlapped in time
+const recordTiming = op => process.env.STUB_TIMING && fs.appendFileSync(process.env.STUB_TIMING, JSON.stringify({ profile, op, start: began, end: Date.now() }) + '\n');
 const delay = Number(process.env.STUB_DELAY_MS || 0);
 const wait = () => (delay > 0 ? Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay) : undefined);
 const actionDelay = Number(process.env.STUB_ACTION_DELAY_MS || 0);
@@ -23,6 +26,7 @@ if (!(profile in state)) {
 	process.exit(1);
 } else if (args.includes('--list-extensions')) {
 	wait();
+	recordTiming('list');
 	// STUB_GHOSTS: { "<profile>": [ids] } shown by the list of that profile although the CLI then says they are not installed
 	console.log([...state[profile], ...(JSON.parse(process.env.STUB_GHOSTS || '{}')[profile] ?? [])].map(id => `${id}@1.0.0`).join('\n'));
 } else if (args.includes('--install-extension')) {
