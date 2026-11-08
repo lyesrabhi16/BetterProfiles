@@ -400,6 +400,13 @@ it saves a screenshot, the rows of both trees, the notifications, the groups fil
 A bug that was fixed gets a test in the layer where it shows: the two that were only visible in a real window (a title button runs with the
 focused item; a refresh aimed at an item VS Code does not know is ignored) are end-to-end tests.
 
+### Git hook
+
+`npm install` (or `npm ci`) points git at `.githooks` (the `prepare` script sets `core.hooksPath`), so everyone who sets the project up gets the
+`pre-commit` hook without doing anything else. Before a commit it refuses leftover merge conflict markers and `.only` on a test, and when
+TypeScript or the project settings changed it lints the staged TypeScript and type-checks the project (a few seconds). Skip it once with
+`git commit --no-verify`; a hook cannot be forced on anyone, so CI runs the same checks on every pull request.
+
 ### Continuous integration and delivery
 
 `.github/workflows` has three workflows (checked with `actionlint`):
