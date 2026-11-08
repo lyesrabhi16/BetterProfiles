@@ -1,6 +1,7 @@
 #!/bin/sh
 # Runs before every commit. It is switched on by `npm install` (the "prepare" script sets core.hooksPath to this folder).
 # Skip it once with: git commit --no-verify. CI runs the same checks, so skipping only moves the failure to the pull request.
+# The unit and performance tests run in the pre-push hook.
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
@@ -16,9 +17,12 @@ fi
 
 # TypeScript or project settings changed: lint the staged TypeScript and type-check the project (a few seconds)
 echo "$staged" | grep -Eq '^(src/.*\.ts|tsconfig\.json|package\.json)$' || exit 0
+# a check that cannot run is a failed check: skipping it silently is how broken code gets committed
 if ! command -v node >/dev/null 2>&1 || [ ! -x node_modules/.bin/tsc ]; then
-	echo "pre-commit: node or node_modules is missing (enter the dev shell, run npm ci): lint and type check skipped"
-	exit 0
+	echo "pre-commit: cannot lint or type-check, node or node_modules is missing."
+	echo "  Enter the dev shell (nix develop / direnv) or run: npm ci"
+	echo "  To commit anyway: git commit --no-verify (CI will run the same checks)."
+	exit 1
 fi
 ts=$(echo "$staged" | grep -E '^src/.*\.ts$')
 if [ -n "$ts" ]; then
