@@ -468,7 +468,8 @@
     "test:e2e:perf": "npm run compile-tests && mocha --ui tdd --timeout 300000 --exit \"out/e2e/*.perf.js\"",
     "test:e2e:headless": "BETTER_PROFILES_HEADLESS=1 xvfb-run -a -s \"-screen 0 1600x1000x24\" npm run test:e2e",
     "test:e2e:perf:headless": "BETTER_PROFILES_HEADLESS=1 xvfb-run -a -s \"-screen 0 1600x1000x24\" npm run test:e2e:perf",
-    "package:vsix": "vsce package --no-dependencies --allow-missing-repository"
+    "package:vsix": "vsce package --no-dependencies --allow-missing-repository",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.9",

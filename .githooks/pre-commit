@@ -1,0 +1,27 @@
+#!/bin/sh
+# Runs before every commit. It is switched on by `npm install` (the "prepare" script sets core.hooksPath to this folder).
+# Skip it once with: git commit --no-verify. CI runs the same checks, so skipping only moves the failure to the pull request.
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# merge conflict markers left in any staged file (trailing spaces are not checked: Markdown uses them on purpose)
+git -c core.whitespace=-trailing-space diff --cached --check || exit 1
+
+# a focused test would silently stop the rest of the suite from running
+if git diff --cached -U0 -- 'src/**/*.ts' | grep -En '^\+.*\b(suite|test|describe|it)\.only[[:space:]]*\('; then
+	echo "pre-commit: remove .only from the tests above"
+	exit 1
+fi
+
+# TypeScript or project settings changed: lint the staged TypeScript and type-check the project (a few seconds)
+echo "$staged" | grep -Eq '^(src/.*\.ts|tsconfig\.json|package\.json)$' || exit 0
+if ! command -v node >/dev/null 2>&1 || [ ! -x node_modules/.bin/tsc ]; then
+	echo "pre-commit: node or node_modules is missing (enter the dev shell, run npm ci): lint and type check skipped"
+	exit 0
+fi
+ts=$(echo "$staged" | grep -E '^src/.*\.ts$')
+if [ -n "$ts" ]; then
+	echo "$ts" | xargs node_modules/.bin/eslint --max-warnings 0 || exit 1
+fi
+node_modules/.bin/tsc -p . --noEmit || exit 1
