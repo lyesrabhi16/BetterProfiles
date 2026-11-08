@@ -30,7 +30,7 @@ jobs:
       # one end-to-end test installs an extension from the Marketplace through a drop
       BP_E2E_NETWORK: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,7 +57,7 @@ jobs:
     env:
       VSCODE_VERSION: insiders
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
