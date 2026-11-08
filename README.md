@@ -376,12 +376,43 @@ code --extensionDevelopmentPath="$PWD"
 An Extension Development Host window cannot tell which profile it is in (see Known limits), so its status bar reads
 `Profile`. Install the `.vsix` to see the real behaviour.
 
-### How the tests run
+### Tests
 
-Every run uses its own throwaway user-data and extensions directories, so it never touches your real profiles, and
-`npm test` makes two windows: a single folder, and the two-folder workspace in `test-fixtures/multi-root`. The single folder
-(`test-fixtures/workspace é with spaces`) is named with spaces and an accent on purpose: VS Code stores its URI
-percent-encoded, which is what the old detection got wrong.
+Four layers, from fast and narrow to slow and real. Every one of them uses throwaway user-data and extensions folders, so none touches
+your own VS Code or profiles.
+
+| Layer | Command | What it is | Where |
+|---|---|---|---|
+| **Unit** | `npm run test:unit` | The pure logic (groups, graph, indexes, store, catalog, command line parsing, wording) in plain Node. Seconds. | `src/test/unit` |
+| **Performance** | `npm run test:perf` | Time budgets for the hot paths on big inputs (2000 extensions, 200 groups, 20 profiles), and **scaling checks**: 4 times the data must not take much more than 4 times the time, which catches an accidental loop inside a loop on any machine. Writes `perf-results/pure.json`. | `src/test/perf` |
+| **Integration** | `npm test` | The extension inside a real VS Code (the Extension Host) against a **fake command line** (`test-fixtures/stub-code.js`, which stops at the first failure like the real one, can list "ghost" extensions, and can be slowed down): every command, the trees, drag and drop, the graph, the prompts. Two windows: a single folder named with spaces and an accent (VS Code stores its URI percent-encoded) and the two-folder workspace in `test-fixtures/multi-root`. | `src/test/*.test.ts`, `src/test/multiroot` |
+| **End to end** | `npm run test:e2e` (`:headless` on a machine without a display) | A **real VS Code and its real command line** in a sandbox, driven through its debugging port with real mouse events (clicks, hover buttons, Ctrl-click selection, real drag and drop). Fixture extensions are built on the fly (`src/e2e/vsix.ts`), some depending on others, so the real uninstall refuses and retries as it does for a user. Needs no network. | `src/e2e` (`*.e2e.ts`) |
+| **End-to-end performance** | `npm run test:e2e:perf` (`:headless`) | How fast the tab answers in that real window with a group of thirty extensions: the question before an uninstall, the extension leaving the tree, the group leaving, Refresh, the graph. Writes `perf-results/e2e.json`. | `src/e2e/ui.perf.ts` |
+
+Useful settings: `BETTER_PROFILES_VSCODE` (path to a VS Code executable; without it one is downloaded), `VSCODE_VERSION` (`insiders`, or a
+version such as `1.95.0`), `BETTER_PROFILES_HEADLESS=1` (flags a virtual display needs), `BETTER_PROFILES_VSIX` (an already packaged
+extension for the end-to-end tests; otherwise they package it), `BP_PERF_SCALE` (multiplies every time budget, for a slow machine),
+`BP_E2E_NETWORK=1` (also run the test that installs from the Marketplace). The end-to-end tests need Node 22 (a WebSocket) and a window of
+at least 1200x750: with `xvfb-run` that means `-s "-screen 0 1600x1000x24"`, which the `:headless` scripts do. When an end-to-end test fails
+it saves a screenshot, the rows of both trees, the notifications, the groups file, what each profile has and the extension's log under
+`e2e-artifacts/`.
+
+A bug that was fixed gets a test in the layer where it shows: the two that were only visible in a real window (a title button runs with the
+focused item; a refresh aimed at an item VS Code does not know is ignored) are end-to-end tests.
+
+### Continuous integration and delivery
+
+`.github/workflows` has three workflows (checked with `actionlint`):
+
+- **CI** (every push and pull request): types, lint, unit and performance tests; the `.vsix` is packaged once; the integration suite runs on
+  the stable VS Code and, as an informational job, on the oldest version `engines` allows (1.95.0); the end-to-end and end-to-end performance
+  tests install that exact `.vsix`. Time budgets are multiplied by 3 on the shared runners. Performance numbers, screenshots and logs are
+  uploaded as artifacts.
+- **Nightly**: the end-to-end tests with the Marketplace test enabled on stable and on Insiders, and the integration suite on Insiders, so a
+  change in an upcoming VS Code shows up before it ships.
+- **Release** (a tag such as `v1.2.0`, which must equal the version in `package.json`): everything above on the file that will be released,
+  then a GitHub release with the `.vsix`; it is published to the Visual Studio Marketplace and to Open VSX only if the `VSCE_PAT` and
+  `OVSX_PAT` secrets exist.
 
 ## What it cannot do: enabling and disabling extensions
 

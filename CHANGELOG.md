@@ -21,6 +21,9 @@ All notable changes to the "better-profiles" extension are documented here.
 
 ### Fixed
 
+- The graph took quadratic time to build: with a large groups file (thousands of extensions) it could pause the window, because the links
+  were searched for in a list for every extension and every node. It now looks them up by id and grows in step with the file (found by the
+  new performance tests, which check how the time grows with the data).
 - A removal could report dozens of extensions as failed with "Extension 'x' is not installed" (one id, the same message on every line)
   when the first extension it asked for was not installed any more. VS Code's command line checks each extension right before it
   uninstalls it and stops with that error, before printing any progress line, so the extension could not be told which one it had
