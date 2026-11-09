@@ -29,7 +29,7 @@ code --install-extension better-profiles-1.0.0.vsix
 
 No `code` command on your PATH? In VS Code open the Extensions view, choose **…** then **Install from VSIX…**, and pick the file.
 
-An extension is installed per profile. The command above installs it into the Default profile; for another profile add
+An extension is installed per profile. The command above installs it into the Default profile. For another profile add
 `--profile`:
 
 ```bash
@@ -95,8 +95,8 @@ The groups live in one file shared by every profile (VS Code settings are per pr
 }
 ```
 
-`"*"` means every profile; `Default` is the default profile. `"excludes"` (optional) lists extensions a profile does not want although a
-group it follows has them; it is written by **Remove From Profile** on an extension. The file is in this extension's global storage unless
+`"*"` means every profile. `Default` is the default profile. `"excludes"` (optional) lists extensions a profile does not want although a
+group it follows has them. It is written by **Remove From Profile** on an extension. The file is in this extension's global storage unless
 `betterProfiles.groupsFile` points elsewhere (for example into a dotfiles repository).
 
 Extensions VS Code installs once for all profiles ("application scoped") count as present everywhere, and they
@@ -108,8 +108,8 @@ An icon in the Activity Bar opens two trees:
 
 - **Groups**: every group, how many extensions it has and which profiles follow it. Expand one to see its extensions.
 - **Profiles**: Default and every profile, each with its own icon when it has one and the current one marked. Expanding a profile asks VS Code's command line what it
-  has, once; **Refresh** asks again. Inside a profile come first the groups it follows (a group given to all profiles included), each
-  marked "2 of 3 installed" and listing the group's extensions that the profile has; the tooltip names what is missing. After
+  has, once. **Refresh** asks again. Inside a profile come first the groups it follows (a group given to all profiles included), each
+  marked "2 of 3 installed" and listing the group's extensions that the profile has. The tooltip names what is missing. After
   them come the extensions that are in none of those groups. An extension of two followed groups shows under both.
 
 Extensions are shown the way VS Code's own Extensions list shows them: the icon image and the display name, with the
@@ -121,16 +121,16 @@ the network. An extension without an image gets the generic extension icon, and 
 **The graph** (the graph button at the top of either tree, or `Better Profiles: Show Graph`) opens a tab that draws the groups file
 as three columns: the extensions that are in a group, the groups, and the profiles, with a line from each extension to its groups and
 from each group to the profiles that follow it (dashed when it goes to all profiles). Point at anything, or move to it with the
-keyboard, to light up what it connects to; click an extension to open its page. It names extensions and shows their icons like the
+keyboard, to light up what it connects to. Click an extension to open its page. It names extensions and shows their icons like the
 trees do, marks the profile of the window, redraws when the groups change, and has a Refresh button. It shows what the groups file
 says, not what is installed in each profile (the Profiles tree has that).
 
 **Double-click an extension** (in either tree) to open its page, the one the Extensions view shows. The tree only tells an
-extension about clicks, so two clicks within half a second on the same item count as a double click; if VS Code is set to open
+extension about clicks, so two clicks within half a second on the same item count as a double click. If VS Code is set to open
 items on a double click (`workbench.list.openMode`), its own double click is used.
 
 **Right-click** an extension for **Open Extension Page**, **Add to Group**, **Install in Other Profiles** and **Copy Extension Id**.
-In the Groups tree it also has **Remove From Group** (it only edits the groups file; nothing is uninstalled). In the Profiles tree it has
+In the Groups tree it also has **Remove From Group** (it only edits the groups file, nothing is uninstalled). In the Profiles tree it has
 **Remove From Profile** instead, which never touches the group the other profiles share:
 
 - on an extension, it asks, then uninstalls it from that profile only. If a group the profile follows has it, the profile is also
@@ -143,15 +143,15 @@ In the Groups tree it also has **Remove From Group** (it only edits the groups f
 
 These never uninstall this extension, anything listed in `betterProfiles.keepExtensions`, or anything VS Code **applies to all profiles**
 (the Extensions view's "Apply Extension to all Profiles": there is one copy for every profile, so removing it "from this profile" would
-remove it from all of them). Each one that is kept is named with its own reason in the question and in the message afterwards; to remove
+remove it from all of them). Each one that is kept is named with its own reason in the question and in the message afterwards. To remove
 an extension from just one profile, turn that setting off for it in the Extensions view first. VS Code's files say which extensions are
-applied to all profiles; when only the command line's lists are available, an extension installed in every profile is assumed to be.
+applied to all profiles. When only the command line's lists are available, an extension installed in every profile is assumed to be.
 Anything else the command line cannot remove is reported. Deleting a profile can only be done
 through VS Code's own screens (its Delete Profile command takes no arguments). A new, empty profile can be made by opening a window
 with `code --profile NAME`, but deleting and rebuilding a profile would lose its settings, keybindings and snippets, so this
 extension does not do it.
 
-Right-click a group in the Groups tree for **Give To A Profile**, **Set Workspace Triggers** and **Delete Group** (the group itself); a
+Right-click a group in the Groups tree for **Give To A Profile**, **Set Workspace Triggers** and **Delete Group** (the group itself). A
 group inside a profile has the first two and **Remove From Profile**. A profile has **Sync Profile With Its Groups**. The quick **×**
 button does the same as the right-click entry that removes (from the group in the Groups tree, from the profile in the Profiles tree).
 
@@ -190,10 +190,10 @@ they are not in the Command Palette because they need an extension to act on.
 | Entry | What it does |
 |---|---|
 | **[Better Profiles] Add to Group** | A checklist of the groups, with nothing ticked: tick one or more (and **New group** to start another) and the extension is added to each. The notification that follows has a button for the next step: **Sync Profile**, or **Give Group To A Profile** if no profile follows the group yet. |
-| **[Better Profiles] Remove from Group** | A checklist of the groups that hold it: tick one or more to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped; the list it opens names the groups. |
+| **[Better Profiles] Remove from Group** | A checklist of the groups that hold it: tick one or more to take it out of. This only edits the groups file: nothing is uninstalled. It only appears for extensions that are in a group, so seeing it tells you the extension is grouped, the list it opens names the groups. |
 | **[Better Profiles] Install in Other Profiles** | Lists the profiles that do not have the extension yet, with nothing ticked, and installs it into the ones you tick. |
 
-A menu entry's label is fixed text in VS Code, so group names cannot be written into the menu itself; the **Add** list marks the groups that already hold the extension.
+A menu entry's label is fixed text in VS Code, so group names cannot be written into the menu itself. The **Add** list marks the groups that already hold the extension.
 They show for installed extensions that are not built into VS Code. "[Better Profiles] Install in Other Profiles" asks the command line
 about every profile first, so an extension that every profile already has (application scoped) gets a message and
 nothing else.
@@ -206,13 +206,13 @@ Starting VS Code's command line costs a few hundred milliseconds each time, so t
   others under `User/profiles/<id>/` in the user data folder). Reading one takes a few milliseconds, and a file is read again only when its
   size or time changed, as git does with its index. A watcher notices when something else changes one (the Extensions view, another
   window) and the tree redraws without a Refresh. If a file is missing, cannot be understood, or the profile has no folder, the command
-  line is used instead; `betterProfiles.listFromFiles` turns the files off altogether. I checked that the files and the command line
+  line is used instead. `betterProfiles.listFromFiles` turns the files off altogether. I checked that the files and the command line
   agree on a real VS Code, but the file format is VS Code's own and may change: the fallback is there for that.
 - **Extension names and icons are read once.** An extension's folder name has its version in it, so what was read is kept and checked
-  with one look at its `package.json`; changing the groups no longer reads every extension again, and the files name each extension's
+  with one look at its `package.json`. Changing the groups no longer reads every extension again, and the files name each extension's
   folder, so nothing is searched for.
 - **What you do shows first.** A removal takes the extension out of the tree at once and an install puts it there at once, marked
-  "installing…", while the command line works in the background; what it could not do comes back. The questions are built from the lists
+  "installing…", while the command line works in the background. What it could not do comes back. The questions are built from the lists
   above, so they appear immediately, and several extensions are uninstalled in one run of the command line. Right before anything is
   uninstalled, the lists of all profiles are read again (a few milliseconds from the files) so the rule that nothing installed in every
   profile is removed is checked on current data.
@@ -246,10 +246,10 @@ A group can name the files that show a workspace needs it:
 }
 ```
 
-The patterns are globs relative to each workspace folder (no absolute paths, no `..`); `node_modules` and `.git`
+The patterns are globs relative to each workspace folder (no absolute paths, no `..`). `node_modules` and `.git`
 are not searched. A group **without** triggers is always wanted, as before. A group **with** triggers is only wanted
 by the automatic check when one of its patterns matches a file in the open workspace. In the example, opening a
-Flutter project in the "Mobile" profile offers `dart-code.flutter` but not `ms-python.python`; the notification names
+Flutter project in the "Mobile" profile offers `dart-code.flutter` but not `ms-python.python`. The notification names
 the group it matched, and **Sync** installs exactly what it announced.
 
 The check runs when the window starts, when the workspace folders change, and when you save the groups file. It does
@@ -257,7 +257,7 @@ not watch for matching files appearing later.
 
 The search stops at the first match and runs outside the editor process. Measured on a synthetic workspace of 200,000
 files (100,000 of them under `node_modules`), a pattern that matches nothing took about 30 ms, the same as ripgrep on its
-own. Those were warm-cache numbers on an SSD; a cold disk or a far larger repository will take longer.
+own. Those were warm-cache numbers on an SSD. A cold disk or a far larger repository will take longer.
 
 Triggers only decide what the *automatic* check offers:
 
@@ -277,8 +277,8 @@ describe the profile completely, that is the profile has groups and every group 
 offered, whatever the groups say:
 
 - extensions that every profile has, because VS Code installs some once for all profiles ("application scoped")
-  and removing one from a single profile would remove it everywhere;
-- this extension itself;
+  and removing one from a single profile would remove it everywhere.
+- this extension itself.
 - anything in `betterProfiles.keepExtensions`.
 
 A failed uninstall (for example because another extension depends on it) is reported and the rest still run.
@@ -288,7 +288,7 @@ command line, `--list-extensions` and `--install-extension` with `--profile`, th
 and always against *this* VS Code's user-data and extensions folders. If it cannot tell which extensions folder
 that is, it stops and tells you instead of guessing. Extension ids are checked first (`publisher.name`, never a
 flag or a file path). `betterProfiles.codeCommand` and `betterProfiles.codeArgs` let you point it at another build
-or a portable install; both are application-scoped: shared by every profile, and a workspace cannot set them.
+or a portable install. Both are application-scoped: shared by every profile, and a workspace cannot set them.
 
 Every command also accepts arguments, so it can be driven without prompts (see `src/groupCommands.ts`).
 
@@ -319,7 +319,7 @@ Every command also accepts arguments, so it can be driven without prompts (see `
 ### With Nix
 
 `flake.nix` has two dev shells for Linux (x86_64 and aarch64). They use the `vscode` package from nixpkgs, which is
-unfree, to run the tests in a real VS Code; `flake.lock` pins it.
+unfree, to run the tests in a real VS Code. `flake.lock` pins it.
 
 ```bash
 nix develop            # Node.js 22, vsce, and a VS Code for the tests
@@ -335,7 +335,7 @@ nix develop .#headless -c xvfb-run -a npm test
 ```
 
 The shell sets `BETTER_PROFILES_VSCODE` to that VS Code. It is not put on your PATH, so it never replaces the `code` you
-use; set the variable yourself first to test against another build. The tests pass on VS Code 1.119.0 and on 1.144.0,
+use. Set the variable yourself first to test against another build. The tests pass on VS Code 1.119.0 and on 1.144.0,
 the version `flake.lock` pins at the time of writing. `nix flake update` moves the pin. A flake only sees files git knows
 about, so `git add` new files before running `nix develop`.
 
@@ -357,13 +357,13 @@ BETTER_PROFILES_HEADLESS=1 \
 xvfb-run -a npm test
 ```
 
-(I have not run the download path myself; the tests were run with an installed VS Code.)
+(I have not run the download path myself, the tests were run with an installed VS Code.)
 
 ### Run it from source
 
 Open the folder in VS Code, accept the recommended extensions (`amodio.tsl-problem-matcher` supplies the problem matcher that
 the watch task uses), run `npm ci`, and press **F5**. The `Run Extension` launch configuration starts `npm: watch` (webpack) and
-opens an *Extension Development Host* window with the extension loaded. After an edit, webpack rebuilds; reload the
+opens an *Extension Development Host* window with the extension loaded. After an edit, webpack rebuilds. Reload the
 host window to pick it up.
 
 Or without the editor's debugger:
@@ -384,21 +384,21 @@ your own VS Code or profiles.
 | Layer | Command | What it is | Where |
 |---|---|---|---|
 | **Unit** | `npm run test:unit` | The pure logic (groups, graph, indexes, store, catalog, command line parsing, wording) in plain Node. Seconds. | `src/test/unit` |
-| **Performance** | `npm run test:perf` | Time budgets for the hot paths on big inputs (2000 extensions, 200 groups, 20 profiles), and **scaling checks**: 4 times the data must not take much more than 4 times the time, which catches an accidental loop inside a loop on any machine. The scaling checks always fail a test; what a fixed budget means depends on `BP_PERF_MODE` (below). Writes `perf-results/pure.json`. | `src/test/perf` |
+| **Performance** | `npm run test:perf` | Time budgets for the hot paths on big inputs (2000 extensions, 200 groups, 20 profiles), and **scaling checks**: 4 times the data must not take much more than 4 times the time, which catches an accidental loop inside a loop on any machine. The scaling checks always fail a test, what a fixed budget means depends on `BP_PERF_MODE` (below). Writes `perf-results/pure.json`. | `src/test/perf` |
 | **Integration** | `npm test` | The extension inside a real VS Code (the Extension Host) against a **fake command line** (`test-fixtures/stub-code.js`, which stops at the first failure like the real one, can list "ghost" extensions, and can be slowed down): every command, the trees, drag and drop, the graph, the prompts. Two windows: a single folder named with spaces and an accent (VS Code stores its URI percent-encoded) and the two-folder workspace in `test-fixtures/multi-root`. | `src/test/*.test.ts`, `src/test/multiroot` |
 | **End to end** | `npm run test:e2e` (`:headless` on a machine without a display) | A **real VS Code and its real command line** in a sandbox, driven through its debugging port with real mouse events (clicks, hover buttons, Ctrl-click selection, real drag and drop). Fixture extensions are built on the fly (`src/e2e/vsix.ts`), some depending on others, so the real uninstall refuses and retries as it does for a user. Needs no network. | `src/e2e` (`*.e2e.ts`) |
 | **End-to-end performance** | `npm run test:e2e:perf` (`:headless`) | How fast the tab answers in that real window with a group of thirty extensions: the question before an uninstall, the extension leaving the tree, the group leaving, Refresh, the graph. Writes `perf-results/e2e.json`. | `src/e2e/ui.perf.ts` |
 
-Useful settings: `BETTER_PROFILES_VSCODE` (path to a VS Code executable; without it one is downloaded), `VSCODE_VERSION` (`insiders`, or a
+Useful settings: `BETTER_PROFILES_VSCODE` (path to a VS Code executable, without it one is downloaded), `VSCODE_VERSION` (`insiders`, or a
 version such as `1.95.0`), `BETTER_PROFILES_HEADLESS=1` (flags a virtual display needs), `BETTER_PROFILES_VSIX` (an already packaged
-extension for the end-to-end tests; otherwise they package it), `BP_PERF_SCALE` (multiplies every time budget, for a slow machine), `BP_PERF_MODE` (`strict`, the default: over a budget fails; `lenient`: over a budget is a warning and only more than 10 times the budget fails, which is what CI on pull requests and the pre-push hook use, because a shared machine is noisy),
+extension for the end-to-end tests. Otherwise they package it), `BP_PERF_SCALE` (multiplies every time budget, for a slow machine), `BP_PERF_MODE` (`strict`, the default: over a budget fails, `lenient`: over a budget is a warning and only more than 10 times the budget fails, which is what CI on pull requests and the pre-push hook use, because a shared machine is noisy),
 `BP_E2E_NETWORK=1` (also run the test that installs from the Marketplace). The end-to-end tests need Node 22 (a WebSocket) and a window of
 at least 1200x750: with `xvfb-run` that means `-s "-screen 0 1600x1000x24"`, which the `:headless` scripts do. When an end-to-end test fails
 it saves a screenshot, the rows of both trees, the notifications, the groups file, what each profile has and the extension's log under
 `e2e-artifacts/`.
 
 A bug that was fixed gets a test in the layer where it shows: the two that were only visible in a real window (a title button runs with the
-focused item; a refresh aimed at an item VS Code does not know is ignored) are end-to-end tests.
+focused item. A refresh aimed at an item VS Code does not know is ignored) are end-to-end tests.
 
 ### Git hooks
 
@@ -407,25 +407,25 @@ hooks without doing anything else.
 
 - **`pre-commit`** refuses leftover merge conflict markers and `.only` on a test, and when TypeScript or the project settings changed it lints the
   staged TypeScript (no warnings allowed) and type-checks the project. A few seconds.
-- **`pre-push`** runs the unit and performance tests (about 15 seconds; the time budgets are advisory there, see `BP_PERF_MODE`). It does nothing when you only delete a branch. The slower layers run in CI.
+- **`pre-push`** runs the unit and performance tests (about 15 seconds, the time budgets are advisory there, see `BP_PERF_MODE`). It does nothing when you only delete a branch. The slower layers run in CI.
 
 If `node` or `node_modules` is missing, the hook **fails** and says to enter the dev shell or run `npm ci`: a check that cannot run is not a
-passing check. Skip a hook once with `git commit --no-verify` / `git push --no-verify`; a hook cannot be forced on anyone, so CI runs the same
+passing check. Skip a hook once with `git commit --no-verify` / `git push --no-verify`. A hook cannot be forced on anyone, so CI runs the same
 checks on every pull request.
 
 ### Continuous integration and delivery
 
 `.github/workflows` has three workflows (checked with `actionlint`):
 
-- **CI** (every push and pull request): types, lint, unit and performance tests; the `.vsix` is packaged once; the integration suite runs on
-  the stable VS Code and, as an informational job, on the oldest version `engines` allows (1.95.0); the end-to-end and end-to-end performance
-  tests install that exact `.vsix`. Fixed time budgets are advisory there (a warning on the run and a table in the job summary; only more than 10
+- **CI** (every push and pull request): types, lint, unit and performance tests. The `.vsix` is packaged once. The integration suite runs on
+  the stable VS Code and, as an informational job, on the oldest version `engines` allows (1.95.0). The end-to-end and end-to-end performance
+  tests install that exact `.vsix`. Fixed time budgets are advisory there (a warning on the run and a table in the job summary, only more than 10
   times a budget fails), while the growth checks and every behaviour test still fail the build. Performance numbers, screenshots and logs are
   uploaded as artifacts.
 - **Nightly**: the end-to-end tests with the Marketplace test enabled on stable and on Insiders, and the integration suite on Insiders, so a
   change in an upcoming VS Code shows up before it ships. Its performance tests use the strict budgets, on a quiet schedule.
 - **Release** (a tag such as `v1.2.0`, which must equal the version in `package.json`): everything above on the file that will be released (with the strict performance budgets),
-  then a GitHub release with the `.vsix`; it is published to the Visual Studio Marketplace and to Open VSX only if the `VSCE_PAT` and
+  then a GitHub release with the `.vsix`. It is published to the Visual Studio Marketplace and to Open VSX only if the `VSCE_PAT` and
   `OVSX_PAT` secrets exist.
 
 ## What it cannot do: enabling and disabling extensions
